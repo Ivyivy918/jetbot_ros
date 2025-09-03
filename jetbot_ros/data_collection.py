@@ -8,7 +8,6 @@ import cv2
 
 from rclpy.node import Node
 from datetime import datetime
-from PIL import Image as PIL_Image
 
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
@@ -64,7 +63,6 @@ class DataCollectionNode(Node):
         
         if self.xy_label is not None:
             img_path = os.path.join(self.data_path, f"xy_{self.xy_label[0]:03d}_{self.xy_label[1]:03d}_{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.jpg")
-            PIL_Image.fromarray(img).save(img_path)
             self.get_logger().info(f"saved {msg.width}x{msg.height} image to '{img_path}'")
             self.get_logger().info(f"there are {len(fnmatch.filter(os.listdir(self.data_path), '*.jpg'))} images in the dataset")
             
