@@ -134,9 +134,9 @@ def parameters_callback(params):
     
     for param in params:
         if param.name == 'max_linear_vel':
-            self.max_linear_vel = param.value
+            JETBOT_MAX_LIN_VEL = param.value 
         elif param.name == 'max_angular_vel':
-            self.max_angular_vel = param.value
+            JETBOT_MAX_ANG_VEL = param.value
         else:
             raise ValueError(f'unknown parameter {param.name}')
             
