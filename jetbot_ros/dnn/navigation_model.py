@@ -4,6 +4,8 @@
 import os
 import shutil
 import numpy as np
+import cv2
+import math
 
 import torch
 import torch.nn as nn
@@ -28,11 +30,11 @@ torch.manual_seed(1)  # reproducibility
 
 class NavigationModel:
     """
-    Model for navigation
+    Enhanced model for navigation with obstacle avoidance capabilities
     """
     def __init__(self, model, type='regression', resolution=224, warmup=5):
         """
-        Create or load a model.
+        Create or load a model with enhanced navigation capabilities.
         """
         if type != 'classification' and type != 'regression':
             raise ValueError("type must be 'classification' or 'regression' (was '{type}')")
@@ -40,14 +42,33 @@ class NavigationModel:
         self.type = type
         self.resolution = resolution
         
+        # 原有的資料轉換
         self.data_transforms = transforms.Compose([
                 transforms.Resize((self.resolution, self.resolution)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225]),
             ])
+        
+        # 新增：避障相關參數
+        self.obstacle_detection_params = {
+            'edge_threshold_low': 15,
+            'edge_threshold_high': 45,
+            'texture_sensitivity': 25.0,
+            'brightness_baseline': 60,
+            'brightness_sensitivity': 40.0,
+            'gradient_sensitivity': 15.0
+        }
+        
+        # 新增：避障權重
+        self.avoidance_weights = {
+            'edge_score': 0.35,
+            'texture_score': 0.25,
+            'brightness_score': 0.20,
+            'gradient_score': 0.20
+        }
             
-        # load model
+        # 載入模型（保持原有邏輯）
         if len(os.path.splitext(model)[1]) > 0:
             print(f"=> loading model '{model}'")
             checkpoint = torch.load(model)
@@ -92,7 +113,8 @@ class NavigationModel:
                 output = self.model(input)
         
         print(f"=> done with model warm-up")
-        
+
+    # === 原有的屬性和方法 ===
     @property
     def classification(self):
         return self.type == 'classification'
@@ -102,6 +124,7 @@ class NavigationModel:
         return self.type == 'regression'
         
     def infer(self, image):
+        """原有的 DNN 推理方法"""
         image = self.data_transforms(image).unsqueeze(0).cuda()
 
         self.model.eval()
@@ -115,12 +138,194 @@ class NavigationModel:
                 return cls.item(), prob.item()
             else:
                 return output.detach().squeeze().cpu().numpy() if output.requires_grad else output.squeeze().cpu().numpy()
-        
+
+    # === 新增的避障功能 ===
+    
+    def detect_obstacles_single_camera(self, image):
+        """單攝影機障礙物檢測"""
+        try:
+            if image is None:
+                return {'left': 1.0, 'fleft': 1.0, 'front': 1.0, 'fright': 1.0, 'right': 1.0}
+            
+            height, width, _ = image.shape
+            
+            # 定義檢測區域
+            regions = {}
+            regions['left'] = self._detect_obstacle_in_region(image, 0, width//3, height//3, 2*height//3)
+            regions['fleft'] = self._detect_obstacle_in_region(image, width//4, width//2, height//3, 2*height//3)
+            regions['front'] = self._detect_obstacle_in_region(image, width//3, 2*width//3, height//3, 2*height//3)
+            regions['fright'] = self._detect_obstacle_in_region(image, width//2, 3*width//4, height//3, 2*height//3)
+            regions['right'] = self._detect_obstacle_in_region(image, 2*width//3, width, height//3, 2*height//3)
+            
+            return regions
+            
+        except Exception as e:
+            print(f"Single camera obstacle detection error: {str(e)}")
+            return {'left': 1.0, 'fleft': 1.0, 'front': 1.0, 'fright': 1.0, 'right': 1.0}
+
+    def detect_obstacles_dual_camera(self, left_image, right_image):
+        """雙攝影機障礙物檢測"""
+        try:
+            if left_image is None or right_image is None:
+                return {'left': 1.0, 'fleft': 1.0, 'front': 1.0, 'fright': 1.0, 'right': 1.0}
+            
+            # 左攝影機檢測
+            left_regions = self.detect_obstacles_single_camera(left_image)
+            
+            # 右攝影機檢測
+            right_regions = self.detect_obstacles_single_camera(right_image)
+            
+            # 融合雙攝影機結果
+            regions = {}
+            regions['left'] = left_regions['left']  # 純左側用左攝影機
+            regions['fleft'] = min(left_regions['fright'], left_regions['front'])  # 左前方
+            regions['front'] = min(left_regions['front'], right_regions['front'])  # 前方取最小值
+            regions['fright'] = min(right_regions['fleft'], right_regions['front'])  # 右前方
+            regions['right'] = right_regions['right']  # 純右側用右攝影機
+            
+            return regions
+            
+        except Exception as e:
+            print(f"Dual camera obstacle detection error: {str(e)}")
+            return {'left': 1.0, 'fleft': 1.0, 'front': 1.0, 'fright': 1.0, 'right': 1.0}
+
+    def _detect_obstacle_in_region(self, image, x1, x2, y1, y2):
+        """在指定區域檢測障礙物"""
+        try:
+            # 提取 ROI
+            roi = image[y1:y2, x1:x2]
+            if roi.size == 0:
+                return 1.0
+            
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            
+            # 1. 邊緣檢測
+            blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+            edges = cv2.Canny(blurred, 
+                             self.obstacle_detection_params['edge_threshold_low'],
+                             self.obstacle_detection_params['edge_threshold_high'])
+            edge_count = cv2.countNonZero(edges)
+            edge_ratio = edge_count / edges.size if edges.size > 0 else 0
+            edge_score = edge_ratio * 100
+            
+            # 2. 紋理檢測
+            std_dev = np.std(gray.astype(np.float32))
+            texture_score = min(std_dev / self.obstacle_detection_params['texture_sensitivity'], 1.0) * 100
+            
+            # 3. 亮度檢測
+            mean_brightness = np.mean(gray)
+            brightness_diff = abs(mean_brightness - self.obstacle_detection_params['brightness_baseline'])
+            brightness_score = min(brightness_diff / self.obstacle_detection_params['brightness_sensitivity'], 1.0) * 100
+            
+            # 4. 梯度檢測
+            sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            gradient_magnitude = np.sqrt(sobelx**2 + sobely**2)
+            gradient_score = min(np.mean(gradient_magnitude) / self.obstacle_detection_params['gradient_sensitivity'], 1.0) * 100
+            
+            # 5. 綜合評分
+            obstacle_score = (
+                edge_score * self.avoidance_weights['edge_score'] + 
+                texture_score * self.avoidance_weights['texture_score'] + 
+                brightness_score * self.avoidance_weights['brightness_score'] + 
+                gradient_score * self.avoidance_weights['gradient_score']
+            )
+            
+            # 轉換為距離值（1.0 = 無障礙物，0.0 = 有障礙物）
+            simulated_distance = max(0.0, 1.0 - obstacle_score / 100.0)
+            
+            return simulated_distance
+            
+        except Exception as e:
+            print(f"Region obstacle detection error: {str(e)}")
+            return 1.0
+
+    def calculate_avoidance_vector(self, regions, avoidance_threshold=0.5):
+        """根據障礙物檢測結果計算避障向量"""
+        try:
+            # 檢測各區域是否有障礙物
+            front_close = regions['front'] < avoidance_threshold
+            fleft_close = regions['fleft'] < avoidance_threshold
+            fright_close = regions['fright'] < avoidance_threshold
+            left_close = regions['left'] < avoidance_threshold
+            right_close = regions['right'] < avoidance_threshold
+            
+            # 初始化避障指令
+            avoid_linear = 0.0
+            avoid_angular = 0.0
+            
+            # 避障邏輯
+            if front_close and not fleft_close and not fright_close:
+                # 正前方有障礙物，左右都沒有 -> 右轉
+                avoid_linear = 0.1
+                avoid_angular = -0.3
+            elif not front_close and fleft_close and not fright_close:
+                # 左前方有障礙物 -> 右轉
+                avoid_linear = 0.15
+                avoid_angular = -0.2
+            elif not front_close and not fleft_close and fright_close:
+                # 右前方有障礙物 -> 左轉
+                avoid_linear = 0.15
+                avoid_angular = 0.2
+            elif front_close and fleft_close and not fright_close:
+                # 正前方和左前方都有障礙物 -> 大幅右轉
+                avoid_linear = 0.05
+                avoid_angular = -0.4
+            elif front_close and not fleft_close and fright_close:
+                # 正前方和右前方都有障礙物 -> 大幅左轉
+                avoid_linear = 0.05
+                avoid_angular = 0.4
+            elif not front_close and fleft_close and fright_close:
+                # 左右前方都有障礙物，正前方沒有 -> 直行
+                avoid_linear = 0.2
+                avoid_angular = 0.0
+            elif front_close and fleft_close and fright_close:
+                # 三個方向都有障礙物 -> 後退並轉向
+                avoid_linear = -0.1
+                avoid_angular = -0.3
+            else:
+                # 沒有障礙物或只有左右側障礙物 -> 正常前進
+                avoid_linear = 0.0
+                avoid_angular = 0.0
+            
+            return avoid_linear, avoid_angular
+            
+        except Exception as e:
+            print(f"Avoidance vector calculation error: {str(e)}")
+            return 0.0, 0.0
+
+    def update_obstacle_detection_params(self, **kwargs):
+        """更新障礙物檢測參數"""
+        for key, value in kwargs.items():
+            if key in self.obstacle_detection_params:
+                self.obstacle_detection_params[key] = value
+                print(f"Updated {key} to {value}")
+            else:
+                print(f"Unknown parameter: {key}")
+
+    def update_avoidance_weights(self, **kwargs):
+        """更新避障權重"""
+        for key, value in kwargs.items():
+            if key in self.avoidance_weights:
+                self.avoidance_weights[key] = value
+                print(f"Updated weight {key} to {value}")
+            else:
+                print(f"Unknown weight: {key}")
+
+    def get_obstacle_detection_info(self):
+        """獲取障礙物檢測參數信息"""
+        return {
+            'params': self.obstacle_detection_params.copy(),
+            'weights': self.avoidance_weights.copy()
+        }
+
+    # === 保持原有的訓練和其他方法 ===
+    
     def train(self, dataset, epochs=10, batch_size=1, learning_rate=0.01, scheduler='StepLR_75', 
               workers=1, train_split=0.8, print_freq=10, use_class_weights=True, 
               save=f"data/models/{datetime.now().strftime('%Y%m%d%H%M')}"):
         """
-        Train the model on a dataset
+        Train the model on a dataset (原有方法保持不變)
         """
         train_loader, val_loader, class_weights = self.load_dataset(dataset, batch_size, workers, train_split)
         
@@ -211,10 +416,10 @@ class NavigationModel:
                 best_metric = max(val_accuracy, best_metric)
             else:
                 best_metric = min(val_loss, best_metric)
-                
+
     def validate(self, val_loader, criterion, epoch, print_freq=10):
         """
-        Measure model performance on the val dataset
+        Measure model performance on the val dataset (原有方法)
         """
         self.model.eval()
         
@@ -276,7 +481,7 @@ class NavigationModel:
         
     def load_dataset(self, dataset, batch_size=2, workers=1, train_split=0.8):
         """
-        Load dataset from the specified path
+        Load dataset from the specified path (原有方法)
         """
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
@@ -314,7 +519,7 @@ class NavigationModel:
         # reshape model if needed   
         if self.type == 'classification':
             num_outputs = len(dataset.classes)
-            print(f'=> dataset classes: {dataset_classes} ({str(dataset.classes)})')
+            print(f'=> dataset classes: {len(dataset.classes)} ({str(dataset.classes)})')
         else:
             num_outputs = 2
             
@@ -375,4 +580,3 @@ class NavigationModel:
             return default
 
         return int(str[idx+1:])
- 

@@ -22,13 +22,12 @@ class MotorControllerNV(MotorController):
             self.MOTOR_RIGHT : self.driver.getMotor(self.MOTOR_RIGHT)
         }
         
-        # 創建定時器讓馬達持續前進
         self.create_timer(0.1, self.auto_forward_callback)
         
     def auto_forward_callback(self):
         """定時器回調函數 - 讓馬達持續前進"""
         # 設定前進速度 (可調整 0.3 這個值，範圍 0.0-1.0)
-        forward_speed = 0.5  # 50% 速度
+        forward_speed = 0.5
         self.set_speed(forward_speed, forward_speed)
         
     def set_speed(self, left, right):
