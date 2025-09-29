@@ -1,333 +1,161 @@
 #!/usr/bin/env python3
 """
-簡化版障礙物檢測程式
-功能：
-1. 車子啟動後持續轉動
-2. 雙攝影機檢測障礙物
-3. 偵測到障礙物立即停止馬達
+簡單的相機測試程式 - 針對JetBot
 """
-
 import cv2
-import numpy as np
-import time
-import threading
-import signal
 import sys
-import atexit
-from Adafruit_MotorHAT import Adafruit_MotorHAT, Adafruit_DCMotor
+import time
 
-class SimpleObstacleDetection:
-    def __init__(self, motor_i2c_addr=0x60):
-        """
-        初始化簡化的障礙物檢測系統
-        """
-        print("=== 簡化版障礙物檢測系統 ===")
-        
-        # 初始化馬達控制
-        try:
-            self.mh = Adafruit_MotorHAT(addr=motor_i2c_addr)
-            self.left_motor = self.mh.getMotor(1)   # M1
-            self.right_motor = self.mh.getMotor(2)  # M2
-            print("✓ 馬達控制器初始化成功")
-        except Exception as e:
-            print(f"✗ 馬達控制器初始化失敗: {e}")
-            sys.exit(1)
-        
-        # 初始化雙攝影機
-        self.camera_left = None
-        self.camera_right = None
-        self.frame_left = None
-        self.frame_right = None
-        self.frame_lock = threading.Lock()
-        
-        # 系統狀態
-        self.running = False
-        self.obstacle_detected = False
-        self.continuous_rotation = True  # 持續轉動模式
-        
-        # 運動參數
-        self.rotation_speed = 100  # 轉動速度 (0-255)
-        self.check_interval = 0.1  # 檢測間隔（秒）
-        
-        # 障礙物檢測參數
-        self.obstacle_threshold = 2000  # 邊緣檢測閾值
-        self.detection_area_ratio = 0.6  # 檢測區域比例
-        
-        # 註冊清理函數
-        atexit.register(self.cleanup)
-        signal.signal(signal.SIGINT, self.signal_handler)
-        
-        # 初始化攝影機
-        if not self.init_cameras():
-            print("攝影機初始化失敗")
-            sys.exit(1)
+def test_camera_methods():
+    """測試不同的相機初始化方法"""
     
-    def signal_handler(self, signum, frame):
-        """處理中斷信號"""
-        print("\n收到中斷信號，正在安全停止...")
-        self.stop_system()
-        sys.exit(0)
+    print("=== 相機連接測試 ===\n")
     
-    def init_cameras(self):
-        """初始化雙攝影機"""
-        print("初始化雙攝影機...")
+    # 測試方法列表
+    test_methods = [
+        {
+            'name': 'USB相機 - /dev/video0',
+            'source': '/dev/video0',
+            'backend': cv2.CAP_V4L2
+        },
+        {
+            'name': 'USB相機 - /dev/video1', 
+            'source': '/dev/video1',
+            'backend': cv2.CAP_V4L2
+        },
+        {
+            'name': 'CSI相機 - sensor_id=0 (完整管道)',
+            'source': 'nvarguscamerasrc sensor_id=0 ! video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink drop=1 max-buffers=2',
+            'backend': cv2.CAP_GSTREAMER
+        },
+        {
+            'name': 'CSI相機 - sensor_id=1 (完整管道)',
+            'source': 'nvarguscamerasrc sensor_id=1 ! video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink drop=1 max-buffers=2',
+            'backend': cv2.CAP_GSTREAMER
+        },
+        {
+            'name': 'CSI相機 - sensor_id=0 (簡化管道)',
+            'source': 'nvarguscamerasrc sensor_id=0 ! video/x-raw(memory:NVMM), width=640, height=480 ! nvvidconv ! video/x-raw, format=BGR ! videoconvert ! appsink',
+            'backend': cv2.CAP_GSTREAMER
+        },
+        {
+            'name': 'CSI相機 - sensor_id=1 (簡化管道)',
+            'source': 'nvarguscamerasrc sensor_id=1 ! video/x-raw(memory:NVMM), width=640, height=480 ! nvvidconv ! video/x-raw, format=BGR ! videoconvert ! appsink',
+            'backend': cv2.CAP_GSTREAMER
+        },
+        {
+            'name': '預設相機 - index 0',
+            'source': 0,
+            'backend': cv2.CAP_ANY
+        },
+        {
+            'name': '預設相機 - index 1',
+            'source': 1,
+            'backend': cv2.CAP_ANY
+        }
+    ]
+    
+    successful_methods = []
+    
+    for i, method in enumerate(test_methods):
+        print(f"測試 {i+1}/8: {method['name']}")
+        print(f"來源: {method['source']}")
         
         try:
-            # 左攝影機 (CSI-0)
-            gst_left = (
-                "nvarguscamerasrc sensor_id=0 ! "
-                "video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! "
-                "nvvidconv ! video/x-raw, format=BGRx ! "
-                "videoconvert ! video/x-raw, format=BGR ! "
-                "appsink drop=1 max-buffers=2"
-            )
-            
-            self.camera_left = cv2.VideoCapture(gst_left, cv2.CAP_GSTREAMER)
-            
-            if self.camera_left.isOpened():
-                print("✓ 左攝影機初始化成功")
+            # 嘗試開啟相機
+            if method['backend'] == cv2.CAP_ANY:
+                cap = cv2.VideoCapture(method['source'])
             else:
-                print("✗ 左攝影機初始化失敗")
-                return False
+                cap = cv2.VideoCapture(method['source'], method['backend'])
             
-            # 右攝影機 (CSI-1)
-            gst_right = (
-                "nvarguscamerasrc sensor_id=1 ! "
-                "video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! "
-                "nvvidconv ! video/x-raw, format=BGRx ! "
-                "videoconvert ! video/x-raw, format=BGR ! "
-                "appsink drop=1 max-buffers=2"
-            )
-            
-            self.camera_right = cv2.VideoCapture(gst_right, cv2.CAP_GSTREAMER)
-            
-            if self.camera_right.isOpened():
-                print("✓ 右攝影機初始化成功")
+            if cap.isOpened():
+                print("  ✓ 相機開啟成功")
+                
+                # 嘗試設定解析度
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                
+                # 獲取實際解析度
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                
+                print(f"  解析度: {width}x{height}, FPS: {fps}")
+                
+                # 嘗試讀取幾幀影像
+                success_count = 0
+                for attempt in range(5):
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        success_count += 1
+                        if attempt == 0:
+                            print(f"  影像尺寸: {frame.shape}")
+                    time.sleep(0.1)
+                
+                if success_count > 0:
+                    print(f"  ✓ 成功讀取 {success_count}/5 幀影像")
+                    successful_methods.append({
+                        'method': method,
+                        'success_rate': success_count / 5,
+                        'resolution': (width, height),
+                        'fps': fps
+                    })
+                else:
+                    print("  ✗ 無法讀取影像")
+                
             else:
-                print("✗ 右攝影機初始化失敗")
-                return False
+                print("  ✗ 無法開啟相機")
             
-            return True
-            
-        except Exception as e:
-            print(f"攝影機初始化錯誤: {e}")
-            return False
-    
-    def start_rotation(self):
-        """開始持續轉動"""
-        if self.continuous_rotation:
-            self.left_motor.setSpeed(self.rotation_speed)
-            self.right_motor.setSpeed(self.rotation_speed)
-            
-            # 設定為原地右轉 (左輪前進，右輪後退)
-            self.left_motor.run(Adafruit_MotorHAT.FORWARD)
-            self.right_motor.run(Adafruit_MotorHAT.BACKWARD)
-            
-            print(f"開始原地轉動 (速度: {self.rotation_speed})")
-    
-    def stop_motors(self):
-        """停止所有馬達"""
-        self.left_motor.run(Adafruit_MotorHAT.RELEASE)
-        self.right_motor.run(Adafruit_MotorHAT.RELEASE)
-        print("馬達已停止")
-    
-    def capture_frames(self):
-        """攝影機擷取線程"""
-        while self.running:
-            try:
-                with self.frame_lock:
-                    # 同時擷取兩個攝影機
-                    if self.camera_left and self.camera_left.isOpened():
-                        ret_left, frame_left = self.camera_left.read()
-                        if ret_left:
-                            self.frame_left = frame_left
-                    
-                    if self.camera_right and self.camera_right.isOpened():
-                        ret_right, frame_right = self.camera_right.read()
-                        if ret_right:
-                            self.frame_right = frame_right
-                
-                time.sleep(0.033)  # ~30 FPS
-                
-            except Exception as e:
-                print(f"攝影機擷取錯誤: {e}")
-                break
-    
-    def detect_obstacle_simple(self):
-        """
-        簡化的障礙物檢測
-        使用邊緣檢測來判斷是否有障礙物
-        """
-        with self.frame_lock:
-            if self.frame_left is None and self.frame_right is None:
-                return False
-        
-        # 使用左攝影機進行主要檢測
-        frame = self.frame_left if self.frame_left is not None else self.frame_right
-        
-        if frame is None:
-            return False
-        
-        try:
-            height, width = frame.shape[:2]
-            
-            # 只檢測前方區域 (下半部分中央區域)
-            roi_y_start = int(height * self.detection_area_ratio)
-            roi_x_start = int(width * 0.3)
-            roi_x_end = int(width * 0.7)
-            
-            roi = frame[roi_y_start:height, roi_x_start:roi_x_end]
-            
-            # 轉換為灰階
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            
-            # 高斯模糊
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            
-            # Canny邊緣檢測
-            edges = cv2.Canny(blurred, 50, 150)
-            
-            # 計算邊緣像素數量
-            edge_count = cv2.countNonZero(edges)
-            
-            # 判斷是否有障礙物
-            has_obstacle = edge_count > self.obstacle_threshold
-            
-            # 如果啟用調試模式，顯示檢測區域
-            if hasattr(self, 'debug_mode') and self.debug_mode:
-                debug_frame = frame.copy()
-                cv2.rectangle(debug_frame, (roi_x_start, roi_y_start), 
-                            (roi_x_end, height), (0, 255, 0) if not has_obstacle else (0, 0, 255), 2)
-                cv2.putText(debug_frame, f"Edges: {edge_count}", (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                cv2.putText(debug_frame, f"Obstacle: {has_obstacle}", (10, 60),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255) if has_obstacle else (0, 255, 0), 2)
-                
-                cv2.imshow('Obstacle Detection', debug_frame)
-                cv2.waitKey(1)
-            
-            return has_obstacle
+            cap.release()
             
         except Exception as e:
-            print(f"障礙物檢測錯誤: {e}")
-            return False
+            print(f"  ✗ 錯誤: {e}")
+        
+        print("-" * 50)
+        time.sleep(0.5)  # 短暫延遲避免衝突
     
-    def control_loop(self):
-        """主控制循環"""
-        print("開始主控制循環...")
+    # 總結結果
+    print("\n=== 測試結果總結 ===")
+    if successful_methods:
+        print(f"找到 {len(successful_methods)} 種可用的相機連接方法：\n")
         
-        # 開始轉動
-        self.start_rotation()
+        for i, result in enumerate(successful_methods):
+            method = result['method']
+            print(f"{i+1}. {method['name']}")
+            print(f"   來源: {method['source']}")
+            print(f"   成功率: {result['success_rate']*100:.0f}%")
+            print(f"   解析度: {result['resolution']}")
+            print(f"   FPS: {result['fps']:.1f}")
+            print()
         
-        while self.running:
-            try:
-                # 檢測障礙物
-                obstacle_detected = self.detect_obstacle_simple()
-                
-                if obstacle_detected != self.obstacle_detected:
-                    self.obstacle_detected = obstacle_detected
-                    
-                    if obstacle_detected:
-                        print("⚠️  偵測到障礙物！停止馬達")
-                        self.stop_motors()
-                        self.continuous_rotation = False
-                    else:
-                        print("✓ 障礙物消失，恢復轉動")
-                        self.continuous_rotation = True
-                        self.start_rotation()
-                
-                time.sleep(self.check_interval)
-                
-            except Exception as e:
-                print(f"控制循環錯誤: {e}")
-                break
-    
-    def run(self, debug_mode=False):
-        """
-        啟動系統
+        # 推薦最佳方法
+        best_method = max(successful_methods, key=lambda x: x['success_rate'])
+        print(f"🎯 推薦使用: {best_method['method']['name']}")
+        print(f"   來源: {best_method['method']['source']}")
         
-        Args:
-            debug_mode: 是否啟用調試模式（顯示檢測視窗）
-        """
-        print("啟動簡化版障礙物檢測系統...")
-        print("功能：持續轉動 → 偵測障礙物 → 自動停止")
-        print("按 Ctrl+C 退出")
-        print("-" * 40)
-        
-        self.debug_mode = debug_mode
-        self.running = True
-        
-        try:
-            # 啟動攝影機擷取線程
-            capture_thread = threading.Thread(target=self.capture_frames, daemon=True)
-            capture_thread.start()
-            
-            # 等待攝影機穩定
-            time.sleep(2)
-            
-            # 執行主控制循環
-            self.control_loop()
-            
-        except KeyboardInterrupt:
-            print("\n收到鍵盤中斷")
-        except Exception as e:
-            print(f"系統錯誤: {e}")
-        finally:
-            self.stop_system()
-    
-    def stop_system(self):
-        """停止系統"""
-        print("正在停止系統...")
-        self.running = False
-        self.continuous_rotation = False
-        self.stop_motors()
-    
-    def cleanup(self):
-        """清理資源"""
-        print("正在清理資源...")
-        
-        # 停止馬達
-        if hasattr(self, 'left_motor') and hasattr(self, 'right_motor'):
-            self.stop_motors()
-        
-        # 關閉攝影機
-        if self.camera_left:
-            self.camera_left.release()
-        if self.camera_right:
-            self.camera_right.release()
-        
-        # 關閉OpenCV視窗
-        cv2.destroyAllWindows()
-        
-        print("資源清理完成")
+    else:
+        print("❌ 沒有找到可用的相機連接方法")
+        print("\n可能的問題：")
+        print("1. 相機硬體未正確連接")
+        print("2. 驅動程式問題")
+        print("3. 權限問題")
+        print("4. 其他程式佔用相機")
+        print("\n建議檢查：")
+        print("- ls -la /dev/video*")
+        print("- dmesg | grep -i camera")
+        print("- sudo fuser /dev/video*")
 
 def main():
-    """主函數"""
-    print("=== Jetson Nano 簡化版障礙物檢測 ===")
-    print("車子將持續原地轉動，直到偵測到障礙物")
-    print()
-    
-    # 詢問是否啟用調試模式
-    debug_mode = False
     try:
-        response = input("是否啟用調試模式？(顯示檢測視窗) [y/N]: ").strip().lower()
-        debug_mode = response.startswith('y')
-    except:
-        pass
-    
-    try:
-        # 創建檢測系統
-        detector = SimpleObstacleDetection()
+        test_camera_methods()
         
-        # 啟動系統
-        detector.run(debug_mode=debug_mode)
+        print("\n按 Enter 繼續，或 Ctrl+C 退出...")
+        input()
         
+    except KeyboardInterrupt:
+        print("\n測試中止")
     except Exception as e:
-        print(f"系統啟動失敗: {e}")
-        print("\n請檢查：")
-        print("1. Motor HAT 是否正確連接")
-        print("2. 攝影機是否正確連接")
-        print("3. I2C 是否正常工作")
+        print(f"程式錯誤: {e}")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
