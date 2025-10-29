@@ -1,147 +1,148 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32
+from geometry_msgs.msg import Twist
 from Adafruit_MotorHAT import Adafruit_MotorHAT
+import atexit
+import traceback
 
-class MotorNode(Node):
+class MotorsNode(Node):
     """
-    Motor control node
+    Simple motor control node for keyboard control
     """
     
     MOTOR_LEFT = 1
     MOTOR_RIGHT = 2
     
     def __init__(self):
-        super().__init__('motor_node')
+        super().__init__('motors_node')
         
         # Initialize MotorHAT
         try:
+            self.get_logger().info("Initializing MotorHAT on i2c_bus=7...")
             self.driver = Adafruit_MotorHAT(i2c_bus=7)
             self.left_motor = self.driver.getMotor(self.MOTOR_LEFT)
             self.right_motor = self.driver.getMotor(self.MOTOR_RIGHT)
             self.get_logger().info("MotorHAT initialized successfully")
         except Exception as e:
             self.get_logger().error(f"MotorHAT initialization failed: {e}")
+            self.get_logger().error(traceback.format_exc())
             raise
         
         # Motor parameters
-        self.rotation_speed = 120  # PWM speed (0-255)
-        self.is_rotating = False
-        self.current_distance = -1.0  # Store current distance
+        self.max_speed = 200  # Maximum PWM speed (0-255)，降低一點測試
+        self.wheel_base = 0.175  # Wheel separation in meters (17.5cm)
         
-        # Subscribe to obstacle detection from camera node
-        self.obstacle_sub = self.create_subscription(
-            Bool,
-            'obstacle_detected',  # Topic published by camera node
-            self.obstacle_callback,
+        # 註冊關閉時停止馬達
+        atexit.register(self.stop_motors)
+        
+        # Subscribe to keyboard control (cmd_vel)
+        self.cmd_vel_sub = self.create_subscription(
+            Twist,
+            '/cmd_vel',
+            self.cmd_vel_callback,
             10
         )
         
-        # Subscribe to distance messages
-        self.distance_sub = self.create_subscription(
-            Float32,
-            'obstacle_distance',  # Distance topic from camera node
-            self.distance_callback,
-            10
-        )
-        
-        # Publish motor status
-        self.motor_status_pub = self.create_publisher(Bool, 'motor_status', 10)
-        
-        # Timer for status publishing
-        self.create_timer(1.0, self.publish_status)
-        
-        # Start rotation on startup
-        self.start_rotation()
-        
-        print("Motor control node started")
-        print("Waiting for camera obstacle detection messages...")
+        self.get_logger().info("Motors node ready - waiting for /cmd_vel commands")
     
-    def obstacle_callback(self, msg):
+    def cmd_vel_callback(self, msg):
         """
-        Receive obstacle detection messages
-        True = obstacle detected, stop motor
-        False = no obstacle, start rotation
+        Receive velocity commands from keyboard
         """
-        obstacle_detected = msg.data
-        
-        if obstacle_detected and self.is_rotating:
-            # Obstacle detected and currently rotating -> stop
-            self.stop_rotation()
+        try:
+            # 除錯訊息
+            self.get_logger().info(f"Received cmd_vel: linear={msg.linear.x:.2f}, angular={msg.angular.z:.2f}")
             
-        elif not obstacle_detected and not self.is_rotating:
-            # No obstacle and currently stopped -> start rotation
-            self.start_rotation()
+            # Calculate differential drive speeds
+            linear_x = msg.linear.x
+            angular_z = msg.angular.z
+            
+            # Differential drive kinematics
+            left_speed = linear_x - angular_z * (self.wheel_base / 2)
+            right_speed = linear_x + angular_z * (self.wheel_base / 2)
+            
+            self.get_logger().info(f"Calculated motor speeds: left={left_speed:.2f}, right={right_speed:.2f}")
+            
+            # Set motor speeds
+            self.get_logger().info("Setting left motor...")
+            self.set_motor_speed(self.left_motor, left_speed, "LEFT")
+            
+            self.get_logger().info("Setting right motor...")
+            self.set_motor_speed(self.right_motor, right_speed, "RIGHT")
+            
+            self.get_logger().info("Motors set successfully")
+            
+        except Exception as e:
+            self.get_logger().error(f"Error in cmd_vel_callback: {e}")
+            self.get_logger().error(traceback.format_exc())
     
-    def distance_callback(self, msg):
+    def set_motor_speed(self, motor, speed, motor_name=""):
         """
-        Receive distance messages
+        Set motor speed and direction
+        speed: -1.0 to 1.0 (normalized)
         """
-        self.current_distance = msg.data
+        try:
+            self.get_logger().info(f"{motor_name}: Starting set_motor_speed with speed={speed:.2f}")
+            
+            # Limit speed range
+            speed = max(min(speed, 1.0), -1.0)
+            
+            # Convert to PWM (0-255)
+            pwm_speed = int(abs(speed) * self.max_speed)
+            
+            self.get_logger().info(f"{motor_name}: PWM={pwm_speed}, speed={speed:.2f}")
+            
+            # Set direction
+            if speed > 0.05:  # Forward (with deadzone)
+                self.get_logger().info(f"{motor_name}: Running FORWARD")
+                motor.run(Adafruit_MotorHAT.FORWARD)
+                motor.setSpeed(pwm_speed)
+                self.get_logger().info(f"{motor_name}: FORWARD at PWM {pwm_speed} - SUCCESS")
+                
+            elif speed < -0.05:  # Backward (with deadzone)
+                self.get_logger().info(f"{motor_name}: Running BACKWARD")
+                motor.run(Adafruit_MotorHAT.BACKWARD)
+                motor.setSpeed(pwm_speed)
+                self.get_logger().info(f"{motor_name}: BACKWARD at PWM {pwm_speed} - SUCCESS")
+                
+            else:  # Stop
+                self.get_logger().info(f"{motor_name}: RELEASE (STOP)")
+                motor.run(Adafruit_MotorHAT.RELEASE)
+                self.get_logger().info(f"{motor_name}: STOP - SUCCESS")
+                
+        except Exception as e:
+            self.get_logger().error(f"Error setting {motor_name} motor: {e}")
+            self.get_logger().error(traceback.format_exc())
     
-    def start_rotation(self):
-        """Start both motors rotating clockwise"""
-        if not self.is_rotating:
-            try:
-                # Set both motors to same direction (clockwise)
-                # Assuming FORWARD is clockwise direction
-                self.left_motor.setSpeed(self.rotation_speed)
-                self.right_motor.setSpeed(self.rotation_speed)
-                
-                self.left_motor.run(Adafruit_MotorHAT.FORWARD)
-                self.right_motor.run(Adafruit_MotorHAT.FORWARD)
-                
-                self.is_rotating = True
-                print("Move forward")
-                
-            except Exception as e:
-                self.get_logger().error(f"Failed to start motors: {e}")
-    
-    def stop_rotation(self):
-        """Stop both motors"""
-        if self.is_rotating:
-            try:
-                self.left_motor.run(Adafruit_MotorHAT.RELEASE)
-                self.right_motor.run(Adafruit_MotorHAT.RELEASE)
-                
-                self.is_rotating = False
-                
-                # Print stop message with distance if available
-                if self.current_distance > 0:
-                    distance_cm = self.current_distance * 100  # Convert to cm
-                    print(f"Stop - Distance: {distance_cm:.1f}cm")
-                else:
-                    print("Stop")
-                
-            except Exception as e:
-                self.get_logger().error(f"Failed to stop motors: {e}")
-    
-    def publish_status(self):
-        """Publish motor status"""
-        status_msg = Bool()
-        status_msg.data = self.is_rotating
-        self.motor_status_pub.publish(status_msg)
-    
-    def destroy_node(self):
-        """Safely stop motors when node is destroyed"""
-        print("Safely stopping motors...")
+    def stop_motors(self):
+        """Stop all motors"""
         try:
             self.left_motor.run(Adafruit_MotorHAT.RELEASE)
             self.right_motor.run(Adafruit_MotorHAT.RELEASE)
-        except:
-            pass
+            self.get_logger().info("Motors stopped")
+        except Exception as e:
+            self.get_logger().error(f"Failed to stop motors: {e}")
+    
+    def destroy_node(self):
+        """Safely stop motors when node is destroyed"""
+        self.get_logger().info("Shutting down motors node...")
+        self.stop_motors()
         super().destroy_node()
 
 def main(args=None):
     rclpy.init(args=args)
+    node = None
     try:
-        node = MotorNode()
+        node = MotorsNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except Exception as e:
+        print(f"Error: {e}")
+        traceback.print_exc()
     finally:
-        if 'node' in locals():
+        if node:
             node.destroy_node()
         rclpy.shutdown()
 
