@@ -5,6 +5,7 @@ from geometry_msgs.msg import Twist
 from Adafruit_MotorHAT import Adafruit_MotorHAT
 import atexit
 import traceback
+import time
 
 class MotorsNode(Node):
     """
@@ -32,6 +33,7 @@ class MotorsNode(Node):
         # 參數設定
         self.max_speed = 200  # 最大PWM速度 (0~255)
         self.wheel_base = 0.175  # 輪距（m）
+        self.stop_timeout = 0.15  # 若超過此秒數未收到cmd_vel，自動停止
 
         # 關閉時停止馬達
         atexit.register(self.stop_motors)
@@ -44,6 +46,10 @@ class MotorsNode(Node):
             10
         )
 
+        # 啟動定時檢查計時器
+        self.last_cmd_time = time.time()
+        self.timer = self.create_timer(0.1, self.check_timeout)
+
         self.get_logger().info("Motors node ready - waiting for /cmd_vel commands")
 
     def cmd_vel_callback(self, msg):
@@ -53,6 +59,7 @@ class MotorsNode(Node):
         try:
             linear_x = msg.linear.x
             angular_z = msg.angular.z
+            self.last_cmd_time = time.time()  # 更新最後收到訊息時間
 
             self.get_logger().info(f"Received cmd_vel: linear={linear_x:.2f}, angular={angular_z:.2f}")
 
@@ -79,20 +86,20 @@ class MotorsNode(Node):
                 self.set_motor_speed(self.left_motor, 0.4, "LEFT")
                 self.set_motor_speed(self.right_motor, 0.0, "RIGHT")
 
-            else:  # 停止
-                self.get_logger().info("Stop (no input)")
-                self.set_motor_speed(self.left_motor, 0.0, "LEFT")
-                self.set_motor_speed(self.right_motor, 0.0, "RIGHT")
+            else:  # 沒輸入
+                self.stop_motors()
 
         except Exception as e:
             self.get_logger().error(f"Error in cmd_vel_callback: {e}")
             self.get_logger().error(traceback.format_exc())
 
+    def check_timeout(self):
+        """定時檢查是否超過 timeout 沒有收到指令"""
+        if time.time() - self.last_cmd_time > self.stop_timeout:
+            self.stop_motors()
+
     def set_motor_speed(self, motor, speed, motor_name=""):
-        """
-        設定單一馬達速度
-        speed 範圍：-1.0 ~ 1.0
-        """
+        """設定單一馬達速度"""
         try:
             speed = max(min(speed, 1.0), -1.0)
             pwm_speed = int(abs(speed) * self.max_speed)
