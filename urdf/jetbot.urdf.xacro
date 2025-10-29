@@ -1,33 +1,31 @@
 <?xml version="1.0"?>
 <robot name="jetbot" xmlns:xacro="http://www.ros.org/wiki/xacro">
-
 <!-- 尺寸定義 -->
+<!-- 參數定義 -->
+<xacro:property name="wheel_radius" value="0.0325"/>  <!-- 對應 wheel_link_radius -->
+<xacro:property name="wheel_thickness" value="0.025"/>  <!-- 對應 wheel_link_length -->
+<xacro:property name="wheel_distance" value="0.175"/>  <!-- 左右輪距 = 2 × 0.0875 -->
+<xacro:property name="wheel_x_offset" value="0.05"/>  <!-- 輪子前後位置 -->
+
 <xacro:property name="body_link_x_dim" value="0.20"/>
 <xacro:property name="body_link_y_dim" value="0.15"/>
 <xacro:property name="body_link_z_dim" value="0.005"/>
-
 <xacro:property name="wheel_link_radius" value="0.0325"/>
 <xacro:property name="wheel_link_length" value="0.025"/>
 <xacro:property name="wheel_link_z_location" value="${-body_link_z_dim/2}"/>
-
-<xacro:property name="caster_link_radius" value="0.01"/>
+<xacro:property name="caster_link_radius" value="0.04"/>
 <xacro:property name="caster_link_z_location" value="${-body_link_z_dim/2-wheel_link_radius+caster_link_radius}"/>
-
 <xacro:property name="camera_radius" value="0.0025"/>
 <xacro:property name="camera_baseline" value="0.16"/>
 <xacro:property name="camera_height_from_body" value="0.155"/>
 <xacro:property name="camera_offset_from_front" value="0.005"/>
-
 <xacro:property name="body_density" value="500.0"/>
 <xacro:property name="wheel_density" value="1000.0"/>
 <xacro:property name="caster_density" value="1000.0"/>
-
 <xacro:property name="pi_constant" value="3.14159265"/>
-
 <xacro:property name="body_mass" value="${body_density*body_link_x_dim*body_link_y_dim*body_link_z_dim}"/>
 <xacro:property name="wheel_mass" value="${wheel_density*pi_constant*wheel_link_radius*wheel_link_radius*wheel_link_length}"/>
 <xacro:property name="caster_mass" value="${caster_density*4.0/3.0*pi_constant*caster_link_radius*caster_link_radius*caster_link_radius}"/>
-
 <xacro:property name="Iz_wheel" value="${0.5*wheel_mass*wheel_link_radius*wheel_link_radius}"/>
 <xacro:property name="I_wheel" value="${(1.0/12.0)*wheel_mass*(3.0*wheel_link_radius*wheel_link_radius+wheel_link_length*wheel_link_length)}"/>
 <xacro:property name="I_caster" value="${(2.0/5.0)*caster_mass*caster_link_radius*caster_link_radius}"/>
@@ -108,65 +106,75 @@
     <child link="base_link"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
 </joint>
+
 <link name="base_link"/>
 
-<!-- 左輪：X=+0.05, Y=+0.0875 -->
+<!-- 左輪 -->
+<link name="left_wheel">
+    <visual>
+        <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
+        <material name="black">
+            <color rgba="0.1 0.1 0.1 1.0"/>
+        </material>
+    </visual>
+    <collision>
+        <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
+    </collision>
+    <inertial>
+        <mass value="0.1"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+                 iyy="0.0001" iyz="0.0"
+                 izz="0.0001"/>
+    </inertial>
+</link>
+
+<!-- 右輪 -->
+<link name="right_wheel">
+    <visual>
+        <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
+        <material name="black"/>
+    </visual>
+    <collision>
+        <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
+    </collision>
+    <inertial>
+        <mass value="0.1"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+                 iyy="0.0001" iyz="0.0"
+                 izz="0.0001"/>
+    </inertial>
+</link>
+
+<!-- 輪子關節 - 用你喜歡的格式 -->
 <joint name="left_wheel_joint" type="continuous">
     <parent link="body_link"/>
-    <child link="left_wheel_link"/>
-    <origin xyz="0.05 0.0875 ${wheel_link_z_location}" rpy="0 0 0"/>
+    <child link="left_wheel"/>
+    <origin xyz="${wheel_x_offset} ${wheel_distance/2} 0" rpy="0 0 0"/>
+    <!-- X=0.05, Y=0.0875, Z=0 -->
     <axis xyz="0 1 0"/>
-    <limit effort="1000" velocity="1000"/>
-    <dynamics damping="1.0" friction="1.0"/>
 </joint>
 
-<link name="left_wheel_link">
-    <visual>
-        <origin rpy="1.5708 0 0" xyz="0 0 0"/>
-        <geometry>
-            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
-        </geometry>
-        <material name="black"/>
-    </visual>
-    
-    <collision>
-        <origin rpy="1.5708 0 0" xyz="0 0 0"/>
-        <geometry>
-            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
-        </geometry>
-    </collision>
-    
-    <xacro:inertia_wheel/>
-</link>
-
-<!-- 右輪：X=+0.05, Y=-0.0875 -->
 <joint name="right_wheel_joint" type="continuous">
     <parent link="body_link"/>
-    <child link="right_wheel_link"/>
-    <origin xyz="0.05 -0.0875 ${wheel_link_z_location}" rpy="0 0 0"/>
+    <child link="right_wheel"/>
+    <origin xyz="${wheel_x_offset} ${-wheel_distance/2} 0" rpy="0 0 0"/>
+    <!-- X=0.05, Y=-0.0875, Z=0 -->
     <axis xyz="0 1 0"/>
-    <limit effort="1000" velocity="1000"/>
-    <dynamics damping="1.0" friction="1.0"/>
-</joint>
-
-<link name="right_wheel_link">
-    <visual>
-        <origin rpy="1.5708 0 0" xyz="0 0 0"/>
-        <geometry>
-            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
-        </geometry>
-        <material name="black"/>
-    </visual>
-    
-    <collision>
-        <origin rpy="1.5708 0 0" xyz="0 0 0"/>
-        <geometry>
-            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
-        </geometry>
-    </collision>
-    
-    <xacro:inertia_wheel/>
-</link>
+</joint>ㄋ
 
 <joint name="caster_joint" type="fixed">
     <parent link="body_link"/>
@@ -245,6 +253,7 @@
     <child link="camera_left_optical_frame"/>
     <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
 </joint>
+
 <link name="camera_left_optical_frame"/>
 
 <joint name="camera_right_joint" type="fixed">
@@ -268,6 +277,7 @@
     <child link="camera_right_optical_frame"/>
     <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
 </joint>
+
 <link name="camera_right_optical_frame"/>
 
 </robot>

@@ -107,6 +107,14 @@ def generate_launch_description():
             ],
             arguments=['--delete_db_on_start']
         ),
+
+        Node(
+            package='joint_state_publisher',
+            executable='joint_state_publisher',
+            parameters=[{
+                'source_list': ['left_wheel_joint', 'right_wheel_joint']
+            }]
+        ),
         
         # ========== RViz2 ==========
         Node(
