@@ -1,105 +1,80 @@
 #!/usr/bin/env python3
+"""
+雙相機物體檢測節點 - Stereo Vision Node
+功能：
+1. 直接讀取雙 CSI 相機影像
+2. 檢測車子前方是否有物體
+3. 計算距離障礙物的距離
+4. 發送訊息給馬達節點
+"""
 import rclpy
 import cv2
+import numpy as np
 import threading
 import time
-import yaml
-import os
 from rclpy.node import Node
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image
+from std_msgs.msg import Bool, Float32
 from cv_bridge import CvBridge
-from ament_index_python.packages import get_package_share_directory
+
 
 class CameraNode(Node):
+    """
+    雙相機物體檢測節點 - 直接讀取物理相機
+    """
+    
     def __init__(self):
-        super().__init__('camera_node')
+        super().__init__('camera_detection_node')
         
         # CV Bridge
         self.bridge = CvBridge()
         
-        # Image storage
+        # 影像儲存
         self.left_image = None
         self.right_image = None
         self.image_lock = threading.Lock()
         
-        # Camera objects
         self.camera_left = None
         self.camera_right = None
         self.capture_thread = None
         self.running = False
         
-        # Publishers - Images
-        self.left_image_pub = self.create_publisher(
-            Image, '/camera_left/image_raw', 10)
-        self.right_image_pub = self.create_publisher(
-            Image, '/camera_right/image_raw', 10)
+        # 參數宣告
+        self.declare_parameter('obstacle_threshold', 2000)
+        self.declare_parameter('detection_area_ratio', 0.6)
+        self.declare_parameter('debug_mode', False)
+        self.declare_parameter('baseline_mm', 60)  
+        self.declare_parameter('focal_length', 400)  
         
-        # Publishers - Camera Info
-        self.left_info_pub = self.create_publisher(
-            CameraInfo, '/camera_left/camera_info', 10)
-        self.right_info_pub = self.create_publisher(
-            CameraInfo, '/camera_right/camera_info', 10)
+        self.obstacle_threshold = self.get_parameter('obstacle_threshold').value
+        self.detection_area_ratio = self.get_parameter('detection_area_ratio').value
+        self.debug_mode = self.get_parameter('debug_mode').value
+        self.baseline_mm = self.get_parameter('baseline_mm').value
+        self.focal_length = self.get_parameter('focal_length').value
         
-        # Load camera calibration
-        self.left_camera_info = self.load_camera_info('left.yaml')
-        self.right_camera_info = self.load_camera_info('right.yaml')
+        # 發布器
+        self.obstacle_pub = self.create_publisher(Bool, 'obstacle_detected', 10)
+        self.distance_pub = self.create_publisher(Float32, 'obstacle_distance', 10)
         
-        if self.left_camera_info and self.right_camera_info:
-            self.get_logger().info("Camera calibration loaded successfully")
-        else:
-            self.get_logger().warning("Failed to load camera calibration")
+        self.left_image_pub = self.create_publisher(Image, '/camera_left/image_raw', 10)
+        self.right_image_pub = self.create_publisher(Image, '/camera_right/image_raw', 10)
         
-        # Initialize cameras
+        # 定時處理 (10Hz)
+        self.create_timer(0.1, self.process_images)
+        
+        # 立體視覺匹配器
+        self.stereo_matcher = cv2.StereoBM_create(numDisparities=64, blockSize=15)
+        
+        # 初始化相機
         self.init_physical_cameras()
-    
-    def load_camera_info(self, filename):
-        """Load camera calibration from yaml file"""
-        try:
-            # 使用 ROS2 標準方式取得套件路徑
-            pkg_share = get_package_share_directory('jetbot_ros')
-            config_path = os.path.join(pkg_share, 'config', filename)
-            
-            # 如果找不到，嘗試開發環境路徑
-            if not os.path.exists(config_path):
-                config_path = os.path.expanduser(f'~/jetbot_ros/config/{filename}')
-            
-            if not os.path.exists(config_path):
-                self.get_logger().error(f"Calibration file not found: {config_path}")
-                return None
-            
-            self.get_logger().info(f"Loading calibration from: {config_path}")
-            
-            with open(config_path, 'r') as f:
-                calib_data = yaml.safe_load(f)
-            
-            camera_info = CameraInfo()
-            camera_info.width = calib_data['image_width']
-            camera_info.height = calib_data['image_height']
-            camera_info.distortion_model = calib_data['distortion_model']
-            
-            camera_info.k = calib_data['camera_matrix']['data']
-            camera_info.d = calib_data['distortion_coefficients']['data']
-            camera_info.r = calib_data['rectification_matrix']['data']
-            camera_info.p = calib_data['projection_matrix']['data']
-            
-            # 設定正確的 frame_id（與 TF 一致）
-            if 'left' in filename:
-                camera_info.header.frame_id = 'camera_left_link'
-            elif 'right' in filename:
-                camera_info.header.frame_id = 'camera_right_link'
-            
-            return camera_info
-            
-        except Exception as e:
-            self.get_logger().error(f"Failed to load camera info: {e}")
-            return None
+        
     
     def init_physical_cameras(self):
-        """Initialize CSI cameras with GStreamer pipeline"""
+        """直接初始化物理 CSI 相機"""
         try:
-            self.get_logger().info("Initializing dual CSI cameras...")
+            self.get_logger().info("正在初始化雙 CSI 相機...")
             
-            # Left camera (CSI-0)
+            # 左相機 (CSI-0)
             gst_left = (
                 "nvarguscamerasrc sensor_id=0 ! "
                 "video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! "
@@ -109,7 +84,7 @@ class CameraNode(Node):
             )
             self.camera_left = cv2.VideoCapture(gst_left, cv2.CAP_GSTREAMER)
             
-            # Right camera (CSI-1)
+            # 右相機 (CSI-1)
             gst_right = (
                 "nvarguscamerasrc sensor_id=1 ! "
                 "video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! "
@@ -119,118 +94,158 @@ class CameraNode(Node):
             )
             self.camera_right = cv2.VideoCapture(gst_right, cv2.CAP_GSTREAMER)
             
-            # Check camera initialization
-            if self.camera_left.isOpened() and self.camera_right.isOpened():
-                self.get_logger().info("Dual CSI cameras initialized successfully")
-                self.start_capture_thread()
-            else:
-                left_status = "OK" if self.camera_left.isOpened() else "FAILED"
-                right_status = "OK" if self.camera_right.isOpened() else "FAILED"
-                self.get_logger().error(f"Camera initialization - Left: {left_status}, Right: {right_status}")
+            if not self.camera_left.isOpened():
+                raise RuntimeError("無法開啟左相機 (CSI-0)")
+            if not self.camera_right.isOpened():
+                raise RuntimeError("無法開啟右相機 (CSI-1)")
                 
+            self.get_logger().info("✓ 雙相機初始化成功")
+            
+            # 啟動擷取執行緒
+            self.running = True
+            self.capture_thread = threading.Thread(target=self.capture_loop, daemon=True)
+            self.capture_thread.start()
+            
         except Exception as e:
-            self.get_logger().error(f"Camera initialization error: {e}")
+            self.get_logger().error(f"相機初始化失敗: {e}")
+            raise
     
-    def start_capture_thread(self):
-        """Start camera capture thread"""
-        self.running = True
-        self.capture_thread = threading.Thread(target=self.capture_loop, daemon=True)
-        self.capture_thread.start()
-        self.get_logger().info("Camera capture thread started")
     
     def capture_loop(self):
-        """Main camera capture loop"""
+        """持續擷取影像的執行緒"""
         while self.running:
-            try:
-                frames_captured = False
-                current_time = self.get_clock().now().to_msg()
-                
-                # Read left camera
-                if self.camera_left and self.camera_left.isOpened():
-                    ret_left, frame_left = self.camera_left.read()
-                    if ret_left:
-                        with self.image_lock:
-                            self.left_image = frame_left
-                            frames_captured = True
-                        
-                        # Publish left camera image and info
-                        try:
-                            img_msg = self.bridge.cv2_to_imgmsg(frame_left, 'bgr8')
-                            img_msg.header.stamp = current_time
-                            img_msg.header.frame_id = 'camera_left_link'
-                            self.left_image_pub.publish(img_msg)
-                            
-                            if self.left_camera_info:
-                                self.left_camera_info.header.stamp = current_time
-                                self.left_camera_info.header.frame_id = 'camera_left_link'
-                                self.left_info_pub.publish(self.left_camera_info)
-                        except Exception as e:
-                            self.get_logger().debug(f"Error publishing left camera: {e}")
-                
-                # Read right camera  
-                if self.camera_right and self.camera_right.isOpened():
-                    ret_right, frame_right = self.camera_right.read()
-                    if ret_right:
-                        with self.image_lock:
-                            self.right_image = frame_right
-                            frames_captured = True
-                        
-                        # Publish right camera image and info
-                        try:
-                            img_msg = self.bridge.cv2_to_imgmsg(frame_right, 'bgr8')
-                            img_msg.header.stamp = current_time
-                            img_msg.header.frame_id = 'camera_right_link'
-                            self.right_image_pub.publish(img_msg)
-                            
-                            if self.right_camera_info:
-                                self.right_camera_info.header.stamp = current_time
-                                self.right_camera_info.header.frame_id = 'camera_right_link'
-                                self.right_info_pub.publish(self.right_camera_info)
-                        except Exception as e:
-                            self.get_logger().debug(f"Error publishing right camera: {e}")
-                
-                if not frames_captured:
-                    self.get_logger().warning("Failed to capture camera frames", 
-                                            throttle_duration_sec=5.0)
-                    
-            except Exception as e:
-                self.get_logger().error(f"Camera capture error: {e}")
-                break
+            ret_left, frame_left = self.camera_left.read()
+            ret_right, frame_right = self.camera_right.read()
             
-            time.sleep(0.033)  # ~30 FPS
+            if ret_left and ret_right:
+                with self.image_lock:
+                    self.left_image = frame_left.copy()
+                    self.right_image = frame_right.copy()
+            
+            time.sleep(0.01)  # 避免過度佔用 CPU
     
-    def cleanup(self):
-        """Clean up resources"""
+    
+    def process_images(self):
+        """處理影像並進行障礙物檢測"""
+        with self.image_lock:
+            if self.left_image is None or self.right_image is None:
+                return
+            
+            left_img = self.left_image.copy()
+            right_img = self.right_image.copy()
+        
+        # 發布原始影像
+        try:
+            left_msg = self.bridge.cv2_to_imgmsg(left_img, encoding='bgr8')
+            right_msg = self.bridge.cv2_to_imgmsg(right_img, encoding='bgr8')
+            
+            left_msg.header.stamp = self.get_clock().now().to_msg()
+            right_msg.header.stamp = self.get_clock().now().to_msg()
+            
+            left_msg.header.frame_id = 'camera_left'
+            right_msg.header.frame_id = 'camera_right'
+            
+            self.left_image_pub.publish(left_msg)
+            self.right_image_pub.publish(right_msg)
+        except Exception as e:
+            self.get_logger().error(f"影像發布失敗: {e}")
+            return
+        
+        # 障礙物檢測
+        obstacle_detected = self.detect_obstacle_simple(left_img)
+        
+        # 發布檢測結果
+        obs_msg = Bool()
+        obs_msg.data = obstacle_detected
+        self.obstacle_pub.publish(obs_msg)
+        
+        if self.debug_mode:
+            self.get_logger().info(f"障礙物檢測: {'有' if obstacle_detected else '無'}")
+    
+    
+    def detect_obstacle_simple(self, image):
+        """簡單的障礙物檢測 - 使用邊緣檢測"""
+        # 轉灰階
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # 定義檢測區域 (中央下方區域)
+        h, w = gray.shape
+        roi_top = int(h * (1 - self.detection_area_ratio))
+        roi = gray[roi_top:, :]
+        
+        # 邊緣檢測
+        edges = cv2.Canny(roi, 50, 150)
+        
+        # 計算邊緣像素數
+        edge_count = np.count_nonzero(edges)
+        
+        # 判斷是否有障礙物
+        return edge_count > self.obstacle_threshold
+    
+    
+    def compute_stereo_disparity(self, left_img, right_img):
+        """計算立體視差圖"""
+        # 轉灰階
+        gray_left = cv2.cvtColor(left_img, cv2.COLOR_BGR2GRAY)
+        gray_right = cv2.cvtColor(right_img, cv2.COLOR_BGR2GRAY)
+        
+        # 計算視差
+        disparity = self.stereo_matcher.compute(gray_left, gray_right)
+        
+        return disparity
+    
+    
+    def estimate_distance(self, disparity):
+        """從視差估算距離 (單位: 公分)"""
+        # 距離公式: distance = (baseline * focal_length) / disparity
+        # baseline: 兩相機間距 (mm)
+        # focal_length: 焦距 (pixels)
+        
+        # 取中央區域的平均視差
+        h, w = disparity.shape
+        center_region = disparity[h//3:2*h//3, w//3:2*w//3]
+        
+        # 過濾無效視差
+        valid_disparity = center_region[center_region > 0]
+        
+        if len(valid_disparity) == 0:
+            return float('inf')
+        
+        avg_disparity = np.median(valid_disparity)
+        
+        # 計算距離 (轉換為公分)
+        distance_mm = (self.baseline_mm * self.focal_length) / (avg_disparity / 16.0)
+        distance_cm = distance_mm / 10.0
+        
+        return distance_cm
+    
+    
+    def destroy_node(self):
+        """清理資源"""
         self.running = False
         
         if self.capture_thread:
-            self.capture_thread.join(timeout=1)
+            self.capture_thread.join(timeout=1.0)
         
         if self.camera_left:
             self.camera_left.release()
         if self.camera_right:
             self.camera_right.release()
-    
-    def destroy_node(self):
-        self.cleanup()
+        
         super().destroy_node()
 
 
 def main(args=None):
     rclpy.init(args=args)
     
+    node = CameraNode()
+    
     try:
-        node = CameraNode()
-        
         rclpy.spin(node)
-        
     except KeyboardInterrupt:
-        print("\nShutdown signal received")
-    except Exception as e:
-        print(f"Execution error: {e}")
+        pass
     finally:
-        if 'node' in locals():
-            node.destroy_node()
+        node.destroy_node()
         rclpy.shutdown()
 
 
