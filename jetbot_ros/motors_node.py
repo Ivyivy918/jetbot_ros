@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TransformStamped, Quaternion
+from nav_msgs.msg import Odometry
+from tf2_ros import TransformBroadcaster
 from Adafruit_MotorHAT import Adafruit_MotorHAT
 import atexit
 import traceback
 import time
+import math
 
 class MotorsNode(Node):
     """
@@ -46,9 +49,26 @@ class MotorsNode(Node):
             10
         )
 
+        # Odometry 相關設定
+        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        # 位置追蹤
+        self.x = 0.0
+        self.y = 0.0
+        self.theta = 0.0
+        self.last_time = self.get_clock().now()
+
+        # 當前速度（用於 odometry）
+        self.current_linear_vel = 0.0
+        self.current_angular_vel = 0.0
+
         # 啟動定時檢查計時器
         self.last_cmd_time = time.time()
         self.timer = self.create_timer(0.1, self.check_timeout)
+
+        # Odometry 更新計時器（50Hz）
+        self.odom_timer = self.create_timer(0.02, self.update_odometry)
 
         self.get_logger().info("Motors node ready - waiting for /cmd_vel commands")
 
@@ -60,6 +80,10 @@ class MotorsNode(Node):
             linear_x = msg.linear.x
             angular_z = msg.angular.z
             self.last_cmd_time = time.time()  # 更新最後收到訊息時間
+
+            # 儲存當前速度用於 odometry 計算
+            self.current_linear_vel = linear_x
+            self.current_angular_vel = angular_z
 
             self.get_logger().info(f"Received cmd_vel: linear={linear_x:.2f}, angular={angular_z:.2f}")
 
@@ -128,6 +152,84 @@ class MotorsNode(Node):
             self.get_logger().info("Motors stopped")
         except Exception as e:
             self.get_logger().error(f"Failed to stop motors: {e}")
+
+    def update_odometry(self):
+        """更新並發布 odometry"""
+        try:
+            current_time = self.get_clock().now()
+            dt = (current_time - self.last_time).nanoseconds / 1e9
+
+            # 計算位移（使用簡單的差分驅動模型）
+            delta_x = self.current_linear_vel * math.cos(self.theta) * dt
+            delta_y = self.current_linear_vel * math.sin(self.theta) * dt
+            delta_theta = self.current_angular_vel * dt
+
+            # 更新位置
+            self.x += delta_x
+            self.y += delta_y
+            self.theta += delta_theta
+
+            # 發布 TF 變換 (odom -> base_footprint)
+            t = TransformStamped()
+            t.header.stamp = current_time.to_msg()
+            t.header.frame_id = 'odom'
+            t.child_frame_id = 'base_footprint'
+
+            t.transform.translation.x = self.x
+            t.transform.translation.y = self.y
+            t.transform.translation.z = 0.0
+
+            # 轉換角度為四元數
+            q = self.euler_to_quaternion(0, 0, self.theta)
+            t.transform.rotation.x = q[0]
+            t.transform.rotation.y = q[1]
+            t.transform.rotation.z = q[2]
+            t.transform.rotation.w = q[3]
+
+            self.tf_broadcaster.sendTransform(t)
+
+            # 發布 Odometry 消息
+            odom = Odometry()
+            odom.header.stamp = current_time.to_msg()
+            odom.header.frame_id = 'odom'
+            odom.child_frame_id = 'base_footprint'
+
+            # 位置
+            odom.pose.pose.position.x = self.x
+            odom.pose.pose.position.y = self.y
+            odom.pose.pose.position.z = 0.0
+            odom.pose.pose.orientation.x = q[0]
+            odom.pose.pose.orientation.y = q[1]
+            odom.pose.pose.orientation.z = q[2]
+            odom.pose.pose.orientation.w = q[3]
+
+            # 速度
+            odom.twist.twist.linear.x = self.current_linear_vel
+            odom.twist.twist.angular.z = self.current_angular_vel
+
+            self.odom_pub.publish(odom)
+
+            self.last_time = current_time
+
+        except Exception as e:
+            self.get_logger().error(f"Error in update_odometry: {e}")
+
+    def euler_to_quaternion(self, roll, pitch, yaw):
+        """將歐拉角轉換為四元數"""
+        cy = math.cos(yaw * 0.5)
+        sy = math.sin(yaw * 0.5)
+        cp = math.cos(pitch * 0.5)
+        sp = math.sin(pitch * 0.5)
+        cr = math.cos(roll * 0.5)
+        sr = math.sin(roll * 0.5)
+
+        q = [0] * 4
+        q[0] = sr * cp * cy - cr * sp * sy  # x
+        q[1] = cr * sp * cy + sr * cp * sy  # y
+        q[2] = cr * cp * sy - sr * sp * cy  # z
+        q[3] = cr * cp * cy + sr * sp * sy  # w
+
+        return q
 
     def destroy_node(self):
         """安全停止"""
