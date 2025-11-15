@@ -168,26 +168,23 @@ class CSICameraNode(Node):
             self.get_logger().error(traceback.format_exc())
     
     def timer_callback(self):
-        ret, frame = self.cap.read()
-        
+         ret, frame = self.cap.read()
+    
         if not ret:
             if self.frame_count % 30 == 0:
                 self.get_logger().warn("Failed to read frame")
             self.frame_count += 1
             return
         
-        # 如果需要手動縮放
+        # 手動縮放（如果需要）
         if self.use_resize:
             if frame.shape[1] != self.output_width or frame.shape[0] != self.output_height:
                 frame = cv2.resize(frame, (self.output_width, self.output_height))
         
-        # 轉換 BGR 到 RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # 發佈影像
+        # 發佈影像 - 使用 bgr8 編碼
         now = self.get_clock().now().to_msg()
         
-        img_msg = self.bridge.cv2_to_imgmsg(frame_rgb, encoding='rgb8')
+        img_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
         img_msg.header.stamp = now
         img_msg.header.frame_id = self.frame_id
         self.image_pub.publish(img_msg)

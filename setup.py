@@ -35,6 +35,8 @@ setup(
         # 相機校正檔案 - 右
         (os.path.join('share', package_name, 'config/camera_calibration/right'), 
          safe_glob('config/camera_calibration/right/*.yaml')),
+        (os.path.join('share', package_name, 'config/camera_calibration/stereo'), 
+         safe_glob('config/camera_calibration/stereo/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
