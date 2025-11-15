@@ -26,7 +26,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        
+        (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
         # Launch files
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
         
@@ -66,12 +66,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'camera_node = jetbot_ros.camera_node:main',
             'motors_node = jetbot_ros.motors_node:main',
             'teleop_keyboard = jetbot_ros.teleop_keyboard:main',
-            'data_collection = jetbot_ros.data_collection:main',
-            'train_navigation = jetbot_ros.dnn.train:main',
-            'reshape_model = jetbot_ros.dnn.reshape_model:main',
         ],
     },
     classifiers=[

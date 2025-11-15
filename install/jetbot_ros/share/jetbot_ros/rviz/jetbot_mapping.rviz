@@ -4,9 +4,12 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /RobotModel1
-        - /Grid1
-        - /PointCloud21
+        - /Global Options1
+        - /RobotModel1/Status1
+        - /RobotModel1/Mass Properties1
+        - /Image1
+        - /Image2
+        - /Path1
         - /Odometry1
       Splitter Ratio: 0.5
     Tree Height: 448
@@ -23,7 +26,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: ""
+        Value: /robot_description
       Enabled: true
       Links:
         All Links Enabled: true
@@ -159,7 +162,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /camera_left/image_raw
+        Value: /stereo/left/image_raw
       Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
@@ -173,7 +176,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /camera_right/image_raw
+        Value: /stereo/right/image_raw
       Value: true
     - Alpha: 1
       Buffer Length: 1
@@ -245,7 +248,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: base_link
+    Fixed Frame: body_link
     Frame Rate: 30
   Name: root
   Tools: ~
