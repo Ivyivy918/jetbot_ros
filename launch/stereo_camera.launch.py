@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-立體相機啟動檔案 - Jetson CSI 相機版本 (修正版)
+立體相機啟動檔案 - Jetson Orin Nano 版本
+包含：相機節點、影像矯正、視差計算、點雲生成
 """
 from launch import LaunchDescription
 from launch_ros.actions import Node
@@ -15,100 +16,116 @@ def generate_launch_description():
     camera_left_yaml = os.path.join(pkg_share, 'config', 'camera_calibration', 'left', 'camera_left.yaml')
     camera_right_yaml = os.path.join(pkg_share, 'config', 'camera_calibration', 'right', 'camera_right.yaml')
     
-    # GStreamer pipeline - 簡化版本
-    # 注意:不要用單引號包住 video/x-raw
-    gst_pipeline_left = (
-        "nvarguscamerasrc sensor-id=1 ! "
-        "video/x-raw(memory:NVMM), width=640, height=480, framerate=30/1, format=NV12 ! "
-        "nvvidconv flip-method=0 ! "
-        "video/x-raw, width=640, height=480, format=BGRx ! "
-        "videoconvert ! "
-        "video/x-raw, format=BGR"
-    )
-    
-    gst_pipeline_right = (
-        "nvarguscamerasrc sensor-id=0 ! "
-        "video/x-raw(memory:NVMM), width=640, height=480, framerate=30/1, format=NV12 ! "
-        "nvvidconv flip-method=0 ! "
-        "video/x-raw, width=640, height=480, format=BGRx ! "
-        "videoconvert ! "
-        "video/x-raw, format=BGR"
-    )
-    
     return LaunchDescription([
         # ========== 左相機 ==========
         Node(
-            package='gscam',
-            executable='gscam_node',
+            package='jetbot_ros',
+            executable='csi_camera_node',
             name='camera_left',
-            namespace='stereo/left',
             output='screen',
             parameters=[{
-                'gscam_config': gst_pipeline_left,
-                'camera_name': 'camera',  # 改成 'camera' 以符合 yaml
+                'sensor_id': 1,
+                'width': 1280,      # CSI 相機支援的解析度
+                'height': 720,
+                'fps': 30,
+                'output_width': 640,   # 輸出解析度
+                'output_height': 480,
                 'camera_frame_id': 'camera_left_optical_frame',
                 'camera_info_url': f'file://{camera_left_yaml}' if os.path.exists(camera_left_yaml) else '',
             }],
             remappings=[
-                ('camera/image_raw', 'image_raw'),
-                ('camera/camera_info', 'camera_info'),
+                ('image_raw', '/stereo/left/image_raw'),
+                ('camera_info', '/stereo/left/camera_info'),
             ]
         ),
         
         # ========== 右相機 ==========
         Node(
-            package='gscam',
-            executable='gscam_node',
+            package='jetbot_ros',
+            executable='csi_camera_node',
             name='camera_right',
-            namespace='stereo/right',
             output='screen',
             parameters=[{
-                'gscam_config': gst_pipeline_right,
-                'camera_name': 'camera',
+                'sensor_id': 0,
+                'width': 1280,
+                'height': 720,
+                'fps': 30,
+                'output_width': 640,
+                'output_height': 480,
                 'camera_frame_id': 'camera_right_optical_frame',
                 'camera_info_url': f'file://{camera_right_yaml}' if os.path.exists(camera_right_yaml) else '',
             }],
             remappings=[
-                ('camera/image_raw', 'image_raw'),
-                ('camera/camera_info', 'camera_info'),
+                ('image_raw', '/stereo/right/image_raw'),
+                ('camera_info', '/stereo/right/camera_info'),
             ]
         ),
         
-        # ========== 視差節點 ==========
+        # ========== 左影像矯正 ==========
+        Node(
+            package='image_proc',
+            executable='image_proc',
+            name='image_proc_left',
+            output='screen',
+            remappings=[
+                ('image', '/stereo/left/image_raw'),
+                ('camera_info', '/stereo/left/camera_info'),
+                ('image_mono', '/stereo/left/image_mono'),
+                ('image_color', '/stereo/left/image_color'),
+                ('image_rect', '/stereo/left/image_rect'),
+                ('image_rect_color', '/stereo/left/image_rect_color'),
+            ]
+        ),
+        
+        # ========== 右影像矯正 ==========
+        Node(
+            package='image_proc',
+            executable='image_proc',
+            name='image_proc_right',
+            output='screen',
+            remappings=[
+                ('image', '/stereo/right/image_raw'),
+                ('camera_info', '/stereo/right/camera_info'),
+                ('image_mono', '/stereo/right/image_mono'),
+                ('image_color', '/stereo/right/image_color'),
+                ('image_rect', '/stereo/right/image_rect'),
+                ('image_rect_color', '/stereo/right/image_rect_color'),
+            ]
+        ),
+        
+        # ========== 視差計算 ==========
         Node(
             package='stereo_image_proc',
             executable='disparity_node',
             name='disparity_node',
-            namespace='stereo',
             output='screen',
             parameters=[{
                 'approximate_sync': True,
-                'queue_size': 10,
             }],
             remappings=[
-                ('left/image_rect', 'left/image_rect'),
-                ('left/camera_info', 'left/camera_info'),
-                ('right/image_rect', 'right/image_rect'),
-                ('right/camera_info', 'right/camera_info'),
+                ('left/image_rect', '/stereo/left/image_rect'),
+                ('left/camera_info', '/stereo/left/camera_info'),
+                ('right/image_rect', '/stereo/right/image_rect'),
+                ('right/camera_info', '/stereo/right/camera_info'),
+                ('disparity', '/stereo/disparity'),
             ]
         ),
         
-        # ========== 點雲節點 ==========
+        # ========== 點雲生成 ==========
         Node(
             package='stereo_image_proc',
             executable='point_cloud_node',
             name='point_cloud_node',
-            namespace='stereo',
             output='screen',
             parameters=[{
                 'approximate_sync': True,
-                'queue_size': 10,
             }],
             remappings=[
-                ('left/image_rect_color', 'left/image_rect_color'),
-                ('left/camera_info', 'left/camera_info'),
-                ('right/camera_info', 'right/camera_info'),
-                ('disparity', 'disparity'),
+                ('left/image_rect_color', '/stereo/left/image_rect_color'),
+                ('left/camera_info', '/stereo/left/camera_info'),
+                ('right/camera_info', '/stereo/right/camera_info'),
+                ('disparity', '/stereo/disparity'),
+                ('points2', '/stereo/points2'),
             ]
         ),
     ])
