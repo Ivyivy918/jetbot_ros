@@ -47,15 +47,18 @@ echo ""
 
 # 4. 檢查相機模組
 echo "4. 檢查相機驅動模組..."
-if lsmod | grep -q imx219; then
-    echo "✓ imx219 模組已載入"
+if lsmod | grep -q "imx219\|nv_imx219"; then
+    echo "✓ IMX219 驅動模組已載入"
+    lsmod | grep -E "imx219|nv_imx219"
 else
-    echo "⚠ imx219 模組未載入，嘗試載入..."
-    sudo modprobe imx219 2>/dev/null
+    echo "⚠ IMX219 驅動模組未載入"
+    echo "  嘗試載入 nv_imx219..."
+    sudo modprobe nv_imx219 2>/dev/null
     if [ $? -eq 0 ]; then
-        echo "✓ 已載入 imx219 模組"
+        echo "✓ 已載入 nv_imx219 模組"
     else
-        echo "✗ 無法載入 imx219 模組"
+        echo "✗ 無法載入驅動模組"
+        echo "  可能需要重新啟動系統"
     fi
 fi
 
