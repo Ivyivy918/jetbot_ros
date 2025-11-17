@@ -113,16 +113,17 @@ class CSICameraNode(Node):
 
         self.get_logger().info("Trying NVIDIA Argus camera pipeline...")
 
-        # Argus pipeline - 專為 Jetson 優化
+        # Argus pipeline - 使用與之前版本相同的配置（已驗證可工作）
+        # 注意：使用 sensor_id (下劃線) 而非 sensor-id (連字符)
         gst_pipeline = (
-            f'nvarguscamerasrc sensor-id={sensor_id} ! '
-            f'video/x-raw(memory:NVMM), width={width}, height={height}, '
+            f'nvarguscamerasrc sensor_id={sensor_id} ! '
+            f'video/x-raw(memory:NVMM), width={self.output_width}, height={self.output_height}, '
             f'format=NV12, framerate={fps}/1 ! '
-            f'nvvidconv flip-method={flip_method} ! '
-            f'video/x-raw, width={self.output_width}, height={self.output_height}, format=BGRx ! '
+            f'nvvidconv ! '
+            f'video/x-raw, format=BGRx ! '
             f'videoconvert ! '
             f'video/x-raw, format=BGR ! '
-            f'appsink max-buffers=1 drop=true'
+            f'appsink drop=1 max-buffers=2'
         )
 
         self.get_logger().info(f"Pipeline: {gst_pipeline}")

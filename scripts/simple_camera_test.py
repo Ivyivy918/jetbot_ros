@@ -53,14 +53,16 @@ def test_gstreamer_argus(sensor_id):
     """測試 NVIDIA Argus 管道"""
     print(f"\n測試 NVIDIA Argus (sensor_id={sensor_id})...")
 
-    # 最簡單的 Argus 管道
+    # 使用與之前工作版本相同的 Argus 管道配置
+    # 注意：使用 sensor_id (下劃線) 而非 sensor-id (連字符)
     pipeline = (
-        f'nvarguscamerasrc sensor-id={sensor_id} ! '
+        f'nvarguscamerasrc sensor_id={sensor_id} ! '
         f'video/x-raw(memory:NVMM), width=640, height=480, format=NV12, framerate=30/1 ! '
         f'nvvidconv ! '
         f'video/x-raw, format=BGRx ! '
         f'videoconvert ! '
-        f'appsink'
+        f'video/x-raw, format=BGR ! '
+        f'appsink drop=1 max-buffers=2'
     )
 
     print(f"管道: {pipeline}")
