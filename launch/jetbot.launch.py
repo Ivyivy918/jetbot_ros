@@ -47,6 +47,24 @@ def generate_launch_description():
 
         # odom -> base_footprint 由 motors_node 動態發布，不再需要靜態 TF
 
+        # base_link -> camera_left (前方1.5cm, 左偏7.5cm, 高10cm)
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_to_camera_left',
+            arguments=['0.015', '0.075', '0.1', '0', '0', '0', 'base_link', 'camera_left'],
+            output='screen'
+        ),
+
+        # base_link -> camera_right (前方1.5cm, 右偏7.5cm, 高10cm)
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_to_camera_right',
+            arguments=['0.015', '-0.075', '0.1', '0', '0', '0', 'base_link', 'camera_right'],
+            output='screen'
+        ),
+
         # ========== Camera Node ==========
         Node(
             package='jetbot_ros',
