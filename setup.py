@@ -34,6 +34,7 @@ setup(
         ('share/' + package_name + '/urdf', glob('urdf/*.xacro') + glob('urdf/*.urdf')),
         
         # Camera calibration files
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
         ('share/' + package_name + '/config/camera_calibration/left',
          glob('config/camera_calibration/left/*.yaml')),
         ('share/' + package_name + '/config/camera_calibration/right',
