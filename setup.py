@@ -34,12 +34,7 @@ setup(
         ('share/' + package_name + '/urdf', glob('urdf/*.xacro') + glob('urdf/*.urdf')),
         
         # Camera calibration files
-        ('share/' + package_name + '/config/camera_calibration/left',
-         glob('config/camera_calibration/left/*.yaml')),
-        ('share/' + package_name + '/config/camera_calibration/right',
-         glob('config/camera_calibration/right/*.yaml')),
-        ('share/' + package_name + '/config/camera_calibration/stereo',
-         glob('config/camera_calibration/stereo/*.yaml')),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
         
         # RViz config
         ('share/' + package_name + '/rviz', glob('rviz/*.rviz')),

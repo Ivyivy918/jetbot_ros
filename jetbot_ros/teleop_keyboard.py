@@ -6,6 +6,7 @@ import sys
 import termios
 import tty
 import os
+import select
 
 # 速度設定
 JETBOT_MAX_LIN_VEL = 0.5
@@ -18,20 +19,28 @@ Moving around:
    W
 A  S  D
 
-W/S : increase/decrease linear velocity
-A/D : increase/decrease angular velocity
-Space : force stop
+W/S : forward/backward
+A/D : turn left/right
 Q : quit
 
+放開按鍵自動停止
 ---------------------------
 """
 
-def get_key():
-    """取得鍵盤輸入"""
+def get_key(timeout=0.1):
+    """取得鍵盤輸入，有 timeout"""
     if os.name == 'nt':
-        return msvcrt.getch().decode()
+        import msvcrt
+        if msvcrt.kbhit():
+            return msvcrt.getch().decode()
+        return ''
+    
     tty.setraw(sys.stdin.fileno())
-    key = sys.stdin.read(1)
+    rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+    if rlist:
+        key = sys.stdin.read(1)
+    else:
+        key = ''
     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
     return key
 
@@ -42,36 +51,26 @@ class TeleopKeyboard(Node):
         
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        self.linear_vel = 0.0
-        self.angular_vel = 0.0
-        
         self.get_logger().info('Teleop Keyboard initialized')
     
-    def update_velocity(self, key):
-        """根據按鍵更新速度"""
-        if key == 'w' or key == 'W':
-            self.linear_vel = JETBOT_MAX_LIN_VEL
-            self.angular_vel = 0.0
-        elif key == 's' or key == 'S':
-            self.linear_vel = -JETBOT_MAX_LIN_VEL
-            self.angular_vel = 0.0
-        elif key == 'a' or key == 'A':
-            self.linear_vel = 0.0
-            self.angular_vel = JETBOT_MAX_ANG_VEL
-        elif key == 'd' or key == 'D':
-            self.linear_vel = 0.0
-            self.angular_vel = -JETBOT_MAX_ANG_VEL
-        elif key == ' ':
-            self.linear_vel = 0.0
-            self.angular_vel = 0.0
+    def process_key(self, key):
+        """根據按鍵設定速度"""
+        linear_vel = 0.0
+        angular_vel = 0.0
         
-        self.publish_velocity()
-    
-    def publish_velocity(self):
-        """發布速度指令"""
+        if key == 'w' or key == 'W':
+            linear_vel = JETBOT_MAX_LIN_VEL
+        elif key == 's' or key == 'S':
+            linear_vel = -JETBOT_MAX_LIN_VEL
+        elif key == 'a' or key == 'A':
+            angular_vel = JETBOT_MAX_ANG_VEL
+        elif key == 'd' or key == 'D':
+            angular_vel = -JETBOT_MAX_ANG_VEL
+        
+        # 發布速度
         twist = Twist()
-        twist.linear.x = self.linear_vel
-        twist.angular.z = self.angular_vel
+        twist.linear.x = linear_vel
+        twist.angular.z = angular_vel
         self.cmd_vel_pub.publish(twist)
 
 
@@ -87,13 +86,13 @@ def main(args=None):
     
     try:
         while rclpy.ok():
-            key = get_key()
+            key = get_key(0.1)
             
             if key == 'q' or key == 'Q':
                 break
             
-            node.update_velocity(key)
-            rclpy.spin_once(node, timeout_sec=0.1)
+            node.process_key(key)
+            rclpy.spin_once(node, timeout_sec=0.01)
             
     except Exception as e:
         print(f"Error: {e}")

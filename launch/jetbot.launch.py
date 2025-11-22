@@ -18,8 +18,8 @@ def generate_launch_description():
     urdf_file = os.path.join(pkg_share, 'urdf', 'jetbot.urdf.xacro')
     
     # 相機校正檔案路徑
-    camera_left_yaml = os.path.join(pkg_share, 'config/camera_calibration/left/camera_left.yaml')
-    camera_right_yaml = os.path.join(pkg_share, 'config/camera_calibration/right/camera_right.yaml')
+    camera_left_yaml = os.path.join(pkg_share, 'config/left.yaml')
+    camera_right_yaml = os.path.join(pkg_share, 'config/right.yaml')
     
     return LaunchDescription([
         # ========== Robot State Publisher ==========
@@ -46,15 +46,16 @@ def generate_launch_description():
         ),
 
         # odom -> base_footprint 由 motors_node 動態發布，不再需要靜態 TF
+        
 
         # ========== Camera Node ==========
-        # 左側相機損壞，暫時停用雙相機功能
-        # Node(
-        #     package='jetbot_ros',
-        #     executable='camera_node',
-        #     name='camera_node',
-        #     output='screen'
-        # ),
+        #左側相機損壞，暫時停用雙相機功能
+        Node(
+            package='jetbot_ros',
+            executable='camera_node',
+            name='camera_node',
+            output='screen'
+        ),
         
         # ========== Motor Node ==========
         Node(
@@ -76,58 +77,58 @@ def generate_launch_description():
         
         # ========== RTAB-Map SLAM ==========
         # 需要雙相機才能建立點雲，暫時停用
-        # Node(
-        #     package='rtabmap_slam',
-        #     executable='rtabmap',
-        #     name='rtabmap',
-        #     output='screen',
-        #     parameters=[{
-        #         'subscribe_stereo': True,
-        #         'subscribe_depth': False,
-        #         'frame_id': 'base_link',
-        #         'map_frame_id': 'map',
-        #         'odom_frame_id': 'odom',
-        #         'publish_tf': True,
-        #         'approx_sync': True,
-        #         'wait_for_transform': 0.5,
-        #
-        #         # 檢測和更新頻率
-        #         'Rtabmap/DetectionRate': '1.0',
-        #         'RGBD/AngularUpdate': '0.01',
-        #         'RGBD/LinearUpdate': '0.01',
-        #
-        #         # 點雲生成設定
-        #         'Grid/FromDepth': 'false',
-        #         'Grid/CellSize': '0.05',
-        #         'Grid/RangeMax': '5.0',
-        #         'Grid/ClusterRadius': '0.1',
-        #         'Grid/GroundIsObstacle': 'false',
-        #
-        #         # 立體視覺設定
-        #         'Stereo/MaxDisparity': '128.0',
-        #         'Stereo/MinDisparity': '1.0',
-        #         'Stereo/OpticalFlow': 'true',
-        #
-        #         # 優化設定
-        #         'RGBD/OptimizeFromGraphEnd': 'false',
-        #         'Optimizer/Strategy': '0',
-        #         'Mem/IncrementalMemory': 'true',
-        #         'Mem/InitWMWithAllNodes': 'false',
-        #
-        #         # 點雲輸出設定
-        #         'cloud_decimation': 2,
-        #         'cloud_max_depth': 5.0,
-        #         'cloud_voxel_size': 0.01,
-        #     }],
-        #     remappings=[
-        #         ('left/image_rect', '/camera_left/image_raw'),
-        #         ('right/image_rect', '/camera_right/image_raw'),
-        #         ('left/camera_info', '/camera_left/camera_info'),
-        #         ('right/camera_info', '/camera_right/camera_info'),
-        #         ('odom', '/odom'),
-        #     ],
-        #     arguments=['--delete_db_on_start']
-        # ),
+        Node(
+            package='rtabmap_slam',
+            executable='rtabmap',
+            name='rtabmap',
+            output='screen',
+            parameters=[{
+                'subscribe_stereo': True,
+                'subscribe_depth': False,
+                'frame_id': 'base_link',
+                'map_frame_id': 'map',
+                'odom_frame_id': 'odom',
+                'publish_tf': True,
+                'approx_sync': True,
+                'wait_for_transform': 0.5,
+        
+                # 檢測和更新頻率
+                'Rtabmap/DetectionRate': '1.0',
+                'RGBD/AngularUpdate': '0.01',
+                'RGBD/LinearUpdate': '0.01',
+        
+                # 點雲生成設定
+                'Grid/FromDepth': 'false',
+                'Grid/CellSize': '0.05',
+                'Grid/RangeMax': '5.0',
+                'Grid/ClusterRadius': '0.1',
+                'Grid/GroundIsObstacle': 'false',
+        
+                # 立體視覺設定
+                'Stereo/MaxDisparity': '128.0',
+                'Stereo/MinDisparity': '1.0',
+                'Stereo/OpticalFlow': 'true',
+        
+                # 優化設定
+                'RGBD/OptimizeFromGraphEnd': 'false',
+                'Optimizer/Strategy': '0',
+                'Mem/IncrementalMemory': 'true',
+                'Mem/InitWMWithAllNodes': 'false',
+        
+                # 點雲輸出設定
+                'cloud_decimation': 2,
+                'cloud_max_depth': 5.0,
+                'cloud_voxel_size': 0.01,
+            }],
+            remappings=[
+                ('left/image_rect', '/camera_left/image_raw'),
+                ('right/image_rect', '/camera_right/image_raw'),
+                ('left/camera_info', '/camera_left/camera_info'),
+                ('right/camera_info', '/camera_right/camera_info'),
+                ('odom', '/odom'),
+            ],
+            arguments=['--delete_db_on_start']
+        ),
 
         Node(
             package='joint_state_publisher',
