@@ -4,11 +4,10 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /Map1
-        - /Map1/Status1
-        - /PointCloud1
+        - /Status1
+        - /Grid1
       Splitter Ratio: 0.5
-    Tree Height: 185
+    Tree Height: 183
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -18,7 +17,7 @@ Visualization Manager:
   Class: ""
   Displays:
     - Alpha: 0.5
-      Cell Size: 1
+      Cell Size: 0.05000000074505806
       Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
       Enabled: true
@@ -32,8 +31,8 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 10
-      Reference Frame: <Fixed Frame>
+      Plane Cell Count: 100
+      Reference Frame: base_footprint
       Value: true
     - Class: rviz_default_plugins/TF
       Enabled: false
@@ -89,13 +88,13 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /rtabmap/grid_map
+        Value: /map
       Update Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /rtabmap/grid_map_updates
+        Value: /map_updates
       Use Timestamp: false
       Value: true
     - Alpha: 1
@@ -108,7 +107,7 @@ Visualization Manager:
       Channel Name: intensity
       Class: rviz_default_plugins/PointCloud2
       Color: 255; 255; 255
-      Color Transformer: ""
+      Color Transformer: RGB8
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
@@ -117,7 +116,7 @@ Visualization Manager:
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: PointCloud
-      Position Transformer: ""
+      Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 3
       Size (m): 0.009999999776482582
@@ -128,7 +127,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /rtabmap/cloud_map
+        Value: /cloud_map
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
@@ -256,7 +255,7 @@ Window Geometry:
   Hide Right Dock: false
   Left Camera:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039efc0200000004fb00000016004c006500660074002000430061006d006500720061010000003d000000bc0000002800fffffffb0000001800520069006700680074002000430061006d00650072006101000000ff000000bd0000002800fffffffb000000100044006900730070006c00610079007301000001c20000013c000000c900fffffffb0000000a005600690065007700730100000304000000d7000000a400ffffff000005690000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039cfc0200000004fb00000016004c006500660074002000430061006d006500720061010000003e000000bc0000002800fffffffb0000001800520069006700680074002000430061006d0065007200610100000100000000bc0000002800fffffffb000000100044006900730070006c00610079007301000001c20000013b000000ca00fffffffb0000000a005600690065007700730100000303000000d7000000a600ffffff000005690000039c00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Right Camera:
     collapsed: false
   Views:

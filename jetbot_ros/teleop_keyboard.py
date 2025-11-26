@@ -8,27 +8,22 @@ import tty
 import os
 import select
 
-# 速度設定
 JETBOT_MAX_LIN_VEL = 0.5
 JETBOT_MAX_ANG_VEL = 1.0
 
 msg = """
 Control Your JetBot!
 ---------------------------
-Moving around:
    W
 A  S  D
 
 W/S : forward/backward
 A/D : turn left/right
 Q : quit
-
-放開按鍵自動停止
 ---------------------------
 """
 
 def get_key(timeout=0.1):
-    """取得鍵盤輸入，有 timeout"""
     if os.name == 'nt':
         import msvcrt
         if msvcrt.kbhit():
@@ -48,13 +43,10 @@ def get_key(timeout=0.1):
 class TeleopKeyboard(Node):
     def __init__(self):
         super().__init__('teleop_keyboard')
-        
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        
         self.get_logger().info('Teleop Keyboard initialized')
     
     def process_key(self, key):
-        """根據按鍵設定速度"""
         linear_vel = 0.0
         angular_vel = 0.0
         
@@ -67,7 +59,6 @@ class TeleopKeyboard(Node):
         elif key == 'd' or key == 'D':
             angular_vel = -JETBOT_MAX_ANG_VEL
         
-        # 發布速度
         twist = Twist()
         twist.linear.x = linear_vel
         twist.angular.z = angular_vel
@@ -81,30 +72,22 @@ def main(args=None):
     
     rclpy.init(args=args)
     node = TeleopKeyboard()
-    
     print(msg)
     
     try:
         while rclpy.ok():
             key = get_key(0.1)
-            
             if key == 'q' or key == 'Q':
                 break
-            
             node.process_key(key)
             rclpy.spin_once(node, timeout_sec=0.01)
-            
     except Exception as e:
         print(f"Error: {e}")
-    
     finally:
-        # 停止機器人
         twist = Twist()
         node.cmd_vel_pub.publish(twist)
-        
         if os.name != 'nt':
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
-        
         node.destroy_node()
         rclpy.shutdown()
 

@@ -1,44 +1,51 @@
-ros2 run camera_calibration cameracalibrator \
-  --size 9x7 \
-  --square 0.017 \
-  --approximate 0.1 \
-  --ros-args \
-  -r left:=/camera_left/image_raw \
-  -r right:=/camera_right/image_raw \
-  -r left_camera:=/camera_left \
-  -r right_camera:=/camera_right
+打錯了 -noxdamade，應該是 -noxdamage：
 
-	# 解压校准结果
-cd /tmp
-tar -xzf calibrationdata.tar.gz
+x11vnc -display :1 -auth guess -forever -shared -rfbport 5900 -noxdamage -noxfixes -nowf -noscr
 
-# 创建目录（如果不存在）
-mkdir -p ~/jetbot_ros/config
+你用的是 GNOME 桌面。試試禁用動畫：
 
-# 复制并重命名
-cp ost.yaml ~/jetbot_ros/config/left.yaml
-# 如果有右相机的单独文件
-# cp right.yaml ~/jetbot_ros/config/right.yaml
+dconf write /org/gnome/desktop/interface/enable-animations false
 
-# 或者如果是立体校准，文件名可能是：
-# left-0000.yaml 和 right-0000.yaml
-ls /tmp/*.yaml  # 查看实际生成的文件名
+如果 dconf 也沒有，安裝：
 
-# 复制到 config
-cp /tmp/left*.yaml ~/jetbot_ros/config/left.yaml
-cp /tmp/right*.yaml ~/jetbot_ros/config/right.yaml
+sudo apt install dconf-cli
 
-# 更新到最新版本
-sudo apt update
-sudo apt install --reinstall ros-humble-camera-calibration
-
-# 或是從源碼安裝最新版
-cd ~/ros2_ws/src
-git clone -b humble https://github.com/ros-perception/image_pipeline.git
-cd ~/ros2_ws
-colcon build --packages-select camera_calibration
-source install/setup.bash
-
-[rtabmap-6] [ERROR] (2025-11-23 00:44:23.354) MsgConversion.cpp:2182::convertRGBDMsgs() TF of received image for camera 0 at time 1763829862.096131s is not set!
-[rtabmap-6] [ WARN] (2025-11-23 00:44:23.825) MsgConversion.cpp:2010::getTransform() (getting transform base_link -> camera_left) "camera_left" passed to lookupTransform argument source_frame does not exist.  (wait_for_transform=0.500000)
-[rtabmap-6] [ERROR] (2025-11-23 00:44:23.825) MsgConversion.cpp:2182::convertRGBDMsgs() TF of received image for camera 0 at time 1763829862.397136s is not set!
+23/11/2025 19:46:50 x11vnc version: 0.9.16 lastmod: 2019-01-05  pid: 10773
+23/11/2025 19:46:50 -auth guess: using 'XAUTHORITY=/run/user/1000/gdm/Xauthority' for disp=':1'
+23/11/2025 19:46:50 Using X display :1
+23/11/2025 19:46:50 rootwin: 0x1a4 reswin: 0x4200001 dpy: 0xbf0c18c0
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 ------------------ USEFUL INFORMATION ------------------
+23/11/2025 19:46:50 GrabServer control via XTEST.
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 XKEYBOARD: number of keysyms per keycode 7 is greater
+23/11/2025 19:46:50   than 4 and 51 keysyms are mapped above 4.
+23/11/2025 19:46:50   Automatically switching to -xkb mode.
+23/11/2025 19:46:50   If this makes the key mapping worse you can
+23/11/2025 19:46:50   disable it with the "-noxkb" option.
+23/11/2025 19:46:50   Also, remember "-remap DEAD" for accenting characters.
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 X FBPM extension not supported.
+23/11/2025 19:46:50 X display is capable of DPMS.
+23/11/2025 19:46:50 --------------------------------------------------------
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 Default visual ID: 0x21
+23/11/2025 19:46:50 Read initial data from X display into framebuffer.
+23/11/2025 19:46:50 initialize_screen: fb_depth/fb_bpp/fb_Bpl 24/32/7680
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 X display :1 is 32bpp depth=24 true color
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 ListenOnTCPPort: Address already in use
+23/11/2025 19:46:50 listen6: bind: Address already in use
+23/11/2025 19:46:50 Not listening on IPv6 interface.
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 Xinerama is present and active (e.g. multi-head).
+23/11/2025 19:46:50 Xinerama: number of sub-screens: 1
+23/11/2025 19:46:50 Xinerama: no blackouts needed (only one sub-screen)
+23/11/2025 19:46:50 
+23/11/2025 19:46:50 fb read rate: 831 MB/sec
+23/11/2025 19:46:50 fast read: reset -wait  ms to: 10
+23/11/2025 19:46:50 fast read: reset -defer ms to: 10
+23/11/2025 19:46:50 The X server says there are 10 mouse buttons.
+23/11/2025 19:46:50 Error: could not obtain listening port.
+23/11/2025 19:46:50 deleted 60 tile_row polling images.

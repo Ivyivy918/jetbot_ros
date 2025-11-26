@@ -37,24 +37,24 @@ def generate_launch_description():
         # ========== TF Transforms ==========
         # map -> odom 靜態變換（當不使用 SLAM 時需要）
         # 如果 rtabmap 發布 map->odom，這個可以註解掉
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='map_to_odom',
-            arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
-            output='screen'
-        ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='map_to_odom',
+        #     arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+        #     output='screen'
+        # ),
 
         # odom -> base_footprint 由 motors_node 動態發布，不再需要靜態 TF
         
 
         # ========== Camera Node ==========
-        #左側相機損壞，暫時停用雙相機功能
         Node(
             package='jetbot_ros',
             executable='camera_node',
             name='camera_node',
-            output='screen'
+            output='screen',
+            additional_env={'DISPLAY': ':1'}
         ),
         
         # ========== Motor Node ==========
@@ -76,7 +76,6 @@ def generate_launch_description():
         ),
         
         # ========== RTAB-Map SLAM ==========
-        # 需要雙相機才能建立點雲，暫時停用
         Node(
             package='rtabmap_slam',
             executable='rtabmap',
@@ -98,7 +97,7 @@ def generate_launch_description():
                 'RGBD/LinearUpdate': '0.01',
         
                 # 點雲生成設定
-                'Grid/FromDepth': 'false',
+                'Grid/FromDepth': 'true',
                 'Grid/CellSize': '0.05',
                 'Grid/RangeMax': '5.0',
                 'Grid/ClusterRadius': '0.1',
@@ -108,6 +107,11 @@ def generate_launch_description():
                 'Stereo/MaxDisparity': '128.0',
                 'Stereo/MinDisparity': '1.0',
                 'Stereo/OpticalFlow': 'true',
+                'Stereo/DenseStrategy': '0',
+                'StereoBM/BlockSize': '15', 
+                'StereoBM/NumDisparities': '128',
+                'Vis/CorType': '0',  # 0=Features2D
+                'Vis/EstimationType': '1',  # 1=PnP
         
                 # 優化設定
                 'RGBD/OptimizeFromGraphEnd': 'false',
