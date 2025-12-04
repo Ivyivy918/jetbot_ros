@@ -89,47 +89,39 @@ def generate_launch_description():
                 'odom_frame_id': 'odom',
                 'publish_tf': True,
                 'approx_sync': True,
-                'wait_for_transform': 0.5,
-        
-                # 檢測和更新頻率
-                'Rtabmap/DetectionRate': '1.0',
-                'RGBD/AngularUpdate': '0.01',
-                'RGBD/LinearUpdate': '0.01',
-        
-                # 點雲生成設定
-                'Grid/FromDepth': 'true',
-                'Grid/CellSize': '0.05',
-                'Grid/RangeMax': '5.0',
-                'Grid/ClusterRadius': '0.1',
-                'Grid/GroundIsObstacle': 'false',
-        
-                # 立體視覺設定
-                'Stereo/MaxDisparity': '128.0',
-                'Stereo/MinDisparity': '1.0',
-                'Stereo/OpticalFlow': 'true',
-                'Stereo/DenseStrategy': '0',
-                'StereoBM/BlockSize': '15', 
-                'StereoBM/NumDisparities': '128',
-                'Vis/CorType': '0',  # 0=Features2D
-                'Vis/EstimationType': '1',  # 1=PnP
-        
-                # 優化設定
+                'queue_size': 30,
+                
+                # 降低處理頻率
+                'Rtabmap/DetectionRate': '2.0',
+                
+                # 優化參數
+                'RGBD/AngularUpdate': '0.05',
+                'RGBD/LinearUpdate': '0.05',
                 'RGBD/OptimizeFromGraphEnd': 'false',
                 'Optimizer/Strategy': '0',
                 'Mem/IncrementalMemory': 'true',
                 'Mem/InitWMWithAllNodes': 'false',
-        
-                # 點雲輸出設定
-                'cloud_decimation': 2,
-                'cloud_max_depth': 5.0,
-                'cloud_voxel_size': 0.01,
+                
+                # ===== 關鍵：立體視覺參數 =====
+                'Stereo/MaxDisparity': '256',  # 增加視差範圍
+                'Stereo/MinDisparity': '1',
+                'Stereo/OpticalFlow': 'true',
+                
+                # ===== 關鍵：特徵提取參數 =====
+                'Vis/FeatureType': '6',  # GFTT
+                'Vis/MaxFeatures': '1000',
+                'Vis/MinInliers': '10',  # 降低要求
+                'Vis/InlierDistance': '0.1',
+                
+                # ===== 回環檢測 =====
+                'Kp/DetectorStrategy': '6',  # GFTT
+                'Kp/MaxFeatures': '400',
             }],
             remappings=[
                 ('left/image_rect', '/camera_left/image_raw'),
                 ('right/image_rect', '/camera_right/image_raw'),
                 ('left/camera_info', '/camera_left/camera_info'),
                 ('right/camera_info', '/camera_right/camera_info'),
-                ('odom', '/odom'),
             ],
             arguments=['--delete_db_on_start']
         ),
