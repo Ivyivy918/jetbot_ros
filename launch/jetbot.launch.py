@@ -48,11 +48,11 @@ def generate_launch_description():
         # odom -> base_footprint 由 motors_node 動態發布，不再需要靜態 TF
         
 
-        # ========== Camera Node ==========
+        # ========== Stereo PointCloud Node ==========
         Node(
             package='jetbot_ros',
             executable='camera_node',
-            name='camera_node',
+            name='stereo_pointcloud_node',
             output='screen',
             additional_env={'DISPLAY': ':0'}
         ),
