@@ -60,7 +60,7 @@ def generate_launch_description():
         # ========== Depth Estimation Node ==========
         Node(
             package='jetbot_ros',
-            executable='test_depth',
+            executable='stereo_depth_node',
             name='stereo_depth_node',
             output='screen',
             parameters=[{
