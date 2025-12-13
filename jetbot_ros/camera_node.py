@@ -1,264 +1,155 @@
 #!/usr/bin/env python3
-"""
-雙相機物體檢測節點 - Stereo Vision Node
-功能：
-1. 直接讀取雙 CSI 相機影像
-2. 檢測車子前方是否有物體
-3. 計算距離障礙物的距離
-4. 發送訊息給馬達節點
-"""
 import rclpy
 import cv2
 import numpy as np
-import threading
-import time
 import yaml
 import os
+import threading
+import time
+
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
-from std_msgs.msg import Bool, Float32
 from cv_bridge import CvBridge
 from ament_index_python.packages import get_package_share_directory
 
 
-class CameraNode(Node):
+class StereoCameraNode(Node):
     def __init__(self):
-        super().__init__('camera_detection_node')
-        
+        super().__init__('stereo_camera_node')
+
         self.bridge = CvBridge()
-        self.left_image = None
-        self.right_image = None
-        self.image_lock = threading.Lock()
-        self.camera_left = None
-        self.camera_right = None
-        self.capture_thread = None
-        self.running = False
-        
-        # 參數
-        self.declare_parameter('obstacle_threshold', 2000)
-        self.declare_parameter('detection_area_ratio', 0.6)
-        self.declare_parameter('debug_mode', False)
-        self.declare_parameter('baseline_mm', 60)  
-        self.declare_parameter('focal_length', 400)
-        
-        self.obstacle_threshold = self.get_parameter('obstacle_threshold').value
-        self.detection_area_ratio = self.get_parameter('detection_area_ratio').value
-        self.debug_mode = self.get_parameter('debug_mode').value
-        self.baseline_mm = self.get_parameter('baseline_mm').value
-        self.focal_length = self.get_parameter('focal_length').value
-        
-        # 發布器
-        self.obstacle_pub = self.create_publisher(Bool, 'obstacle_detected', 10)
-        self.distance_pub = self.create_publisher(Float32, 'obstacle_distance', 10)
-        self.left_image_pub = self.create_publisher(Image, '/camera_left/image_raw', 10)
-        self.right_image_pub = self.create_publisher(Image, '/camera_right/image_raw', 10)
-        self.left_info_pub = self.create_publisher(CameraInfo, '/camera_left/camera_info', 10)
-        self.right_info_pub = self.create_publisher(CameraInfo, '/camera_right/camera_info', 10)
+        self.lock = threading.Lock()
 
-        # 載入校準參數
-        self.left_camera_info = CameraInfo()
-        self.right_camera_info = CameraInfo()
-        self.load_camera_calibration()
+        self.left_img = None
+        self.right_img = None
+        self.running = True
 
-        # 定時處理
-        self.create_timer(0.1, self.process_images)
+        # -------------------------------
+        # Load calibration
+        # -------------------------------
+        self.load_calibration()
 
-        # 立體視覺匹配器
-        self.stereo_matcher = cv2.StereoBM_create(numDisparities=64, blockSize=15)
+        # -------------------------------
+        # Publishers (RTAB-Map compatible)
+        # -------------------------------
+        self.pub_left = self.create_publisher(Image, '/camera_left/image_rect', 10)
+        self.pub_right = self.create_publisher(Image, '/camera_right/image_rect', 10)
+        self.pub_left_info = self.create_publisher(CameraInfo, '/camera_left/camera_info', 10)
+        self.pub_right_info = self.create_publisher(CameraInfo, '/camera_right/camera_info', 10)
 
-        # 初始化相機
-        self.init_physical_cameras()
+        # -------------------------------
+        # Init CSI cameras
+        # -------------------------------
+        self.cap_left = cv2.VideoCapture(self.gst_pipeline(1), cv2.CAP_GSTREAMER)
+        self.cap_right = cv2.VideoCapture(self.gst_pipeline(0), cv2.CAP_GSTREAMER)
 
-    def load_camera_calibration(self):
-        try:
-            pkg_share = get_package_share_directory('jetbot_ros')
-            left_yaml = os.path.join(pkg_share, 'config', 'left.yaml')
-            right_yaml = os.path.join(pkg_share, 'config', 'right.yaml')
+        if not self.cap_left.isOpened() or not self.cap_right.isOpened():
+            raise RuntimeError("❌ 無法開啟 CSI 相機")
 
-            if os.path.exists(left_yaml):
-                with open(left_yaml, 'r') as f:
-                    left_calib = yaml.safe_load(f)
-                self.left_camera_info = self.yaml_to_camera_info(left_calib, 'camera_left_optical_frame')
-                self.get_logger().info(f"載入左相機校準: {left_yaml}")
-            else:
-                self.get_logger().warn(f"左相機校準檔案不存在: {left_yaml}")
-                self.left_camera_info = self.get_default_camera_info('camera_left_optical_frame')
+        self.get_logger().info("✅ Stereo CSI cameras opened")
 
-            if os.path.exists(right_yaml):
-                with open(right_yaml, 'r') as f:
-                    right_calib = yaml.safe_load(f)
-                self.right_camera_info = self.yaml_to_camera_info(right_calib, 'camera_right_optical_frame')
-                self.get_logger().info(f"載入右相機校準: {right_yaml}")
-            else:
-                self.get_logger().warn(f"右相機校準檔案不存在: {right_yaml}")
-                self.right_camera_info = self.get_default_camera_info('camera_right_optical_frame')
-        except Exception as e:
-            self.get_logger().error(f"載入校準參數失敗: {e}")
-            self.left_camera_info = self.get_default_camera_info('camera_left_optical_frame')
-            self.right_camera_info = self.get_default_camera_info('camera_right_optical_frame')
+        self.thread = threading.Thread(target=self.capture_loop, daemon=True)
+        self.thread.start()
 
-    def yaml_to_camera_info(self, calib_data, frame_id):
-        info = CameraInfo()
-        info.header.frame_id = frame_id
-        info.width = calib_data.get('image_width', 640)
-        info.height = calib_data.get('image_height', 480)
-        info.distortion_model = calib_data.get('distortion_model', 'plumb_bob')
-        if 'camera_matrix' in calib_data:
-            cm = calib_data['camera_matrix']
-            info.k = cm.get('data', [0.0]*9)
-        if 'distortion_coefficients' in calib_data:
-            dc = calib_data['distortion_coefficients']
-            info.d = dc.get('data', [0.0]*5)
-        if 'rectification_matrix' in calib_data:
-            rm = calib_data['rectification_matrix']
-            info.r = rm.get('data', [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
-        if 'projection_matrix' in calib_data:
-            pm = calib_data['projection_matrix']
-            info.p = pm.get('data', [0.0]*12)
-        return info
+        self.create_timer(1.0 / 15.0, self.publish_images)
 
-    def get_default_camera_info(self, frame_id):
-        info = CameraInfo()
-        info.header.frame_id = frame_id
-        info.width = 640
-        info.height = 480
-        info.distortion_model = 'plumb_bob'
-        fx = 500.0
-        fy = 500.0
-        cx = 320.0
-        cy = 240.0
-        info.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
-        info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
-        info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-        info.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
-        return info
+    # -------------------------------------------------------
+    def gst_pipeline(self, sensor_id):
+        return (
+            f"nvarguscamerasrc sensor-id={sensor_id} ! "
+            "video/x-raw(memory:NVMM), width=1280, height=720, framerate=30/1 ! "
+            "nvvidconv ! videoconvert ! video/x-raw, format=GRAY8 ! appsink"
+        )
 
-    def init_physical_cameras(self):
-        try:
-            self.get_logger().info("正在初始化雙 CSI 相機...")
-            gst_left = (
-                "nvarguscamerasrc sensor-id=0 ! "
-                "video/x-raw(memory:NVMM), width=1280, height=720, framerate=30/1 ! "
-                "nvvidconv ! videoconvert ! video/x-raw, format=GRAY8 ! appsink"
-            )
-            self.camera_left = cv2.VideoCapture(gst_left, cv2.CAP_GSTREAMER)
+    # -------------------------------------------------------
+    def load_calibration(self):
+        pkg = get_package_share_directory('jetbot_ros')
+        left_yaml = os.path.join(pkg, 'config', 'left.yaml')
+        right_yaml = os.path.join(pkg, 'config', 'right.yaml')
 
-            gst_right = (
-                "nvarguscamerasrc sensor-id=1 ! "
-                "video/x-raw(memory:NVMM), width=1280, height=720, framerate=30/1 ! "
-                "nvvidconv ! videoconvert ! video/x-raw, format=GRAY8 ! appsink"
-            )
-            self.camera_right = cv2.VideoCapture(gst_right, cv2.CAP_GSTREAMER)
+        with open(left_yaml, 'r') as f:
+            left = yaml.safe_load(f)
+        with open(right_yaml, 'r') as f:
+            right = yaml.safe_load(f)
 
-            if not self.camera_left.isOpened():
-                raise RuntimeError("無法開啟左相機")
-            if not self.camera_right.isOpened():
-                raise RuntimeError("無法開啟右相機")
+        self.fx = left['camera_matrix']['data'][0]
+        self.fy = left['camera_matrix']['data'][4]
+        self.cx = left['camera_matrix']['data'][2]
+        self.cy = left['camera_matrix']['data'][5]
 
-            self.get_logger().info("✓ 雙相機初始化成功")
+        # baseline = -Tx / fx  (Tx in P matrix)
+        Tx = right['projection_matrix']['data'][3]
+        self.baseline = -Tx / self.fx
 
-            self.running = True
-            self.capture_thread = threading.Thread(target=self.capture_loop, daemon=True)
-            self.capture_thread.start()
-        except Exception as e:
-            self.get_logger().error(f"相機初始化失敗: {e}")
-            raise
+        self.get_logger().info(
+            f"📐 fx={self.fx:.2f}, baseline={self.baseline:.4f} m"
+        )
 
+        self.left_info = self.make_camera_info(left, 'camera_left_optical_frame')
+        self.right_info = self.make_camera_info(right, 'camera_right_optical_frame')
+
+    # -------------------------------------------------------
+    def make_camera_info(self, calib, frame_id):
+        msg = CameraInfo()
+        msg.header.frame_id = frame_id
+        msg.width = calib['image_width']
+        msg.height = calib['image_height']
+        msg.distortion_model = calib['distortion_model']
+        msg.k = calib['camera_matrix']['data']
+        msg.d = calib['distortion_coefficients']['data']
+        msg.r = calib['rectification_matrix']['data']
+        msg.p = calib['projection_matrix']['data']
+        return msg
+
+    # -------------------------------------------------------
     def capture_loop(self):
         while self.running:
-            ret_left, frame_left = self.camera_left.read()
-            ret_right, frame_right = self.camera_right.read()
-            if ret_left and ret_right:
-                with self.image_lock:
-                    self.left_image = frame_left.copy()
-                    self.right_image = frame_right.copy()
-            time.sleep(0.01)
+            ret_l, l = self.cap_left.read()
+            ret_r, r = self.cap_right.read()
+            if ret_l and ret_r:
+                with self.lock:
+                    self.left_img = l.copy()
+                    self.right_img = r.copy()
+            time.sleep(0.005)
 
-    def process_images(self):
-        with self.image_lock:
-            if self.left_image is None or self.right_image is None:
+    # -------------------------------------------------------
+    def publish_images(self):
+        with self.lock:
+            if self.left_img is None or self.right_img is None:
                 return
-            left_img = self.left_image.copy()
-            right_img = self.right_image.copy()
+            left = self.left_img
+            right = self.right_img
 
-        try:
-            # 轉為 BGR 供 RViz 顯示
-            left_bgr = cv2.cvtColor(left_img, cv2.COLOR_GRAY2BGR)
-            right_bgr = cv2.cvtColor(right_img, cv2.COLOR_GRAY2BGR)
+        stamp = self.get_clock().now().to_msg()
 
-            left_msg = self.bridge.cv2_to_imgmsg(left_bgr, encoding='bgr8')
-            right_msg = self.bridge.cv2_to_imgmsg(right_bgr, encoding='bgr8')
+        left_msg = self.bridge.cv2_to_imgmsg(left, encoding='mono8')
+        right_msg = self.bridge.cv2_to_imgmsg(right, encoding='mono8')
 
-            left_msg.header.stamp = self.get_clock().now().to_msg()
-            right_msg.header.stamp = self.get_clock().now().to_msg()
-            left_msg.header.frame_id = 'camera_left_optical_frame'
-            right_msg.header.frame_id = 'camera_right_optical_frame'
+        left_msg.header.stamp = stamp
+        right_msg.header.stamp = stamp
 
-            self.left_image_pub.publish(left_msg)
-            self.right_image_pub.publish(right_msg)
+        self.left_info.header.stamp = stamp
+        self.right_info.header.stamp = stamp
 
-            self.left_camera_info.header.stamp = left_msg.header.stamp
-            self.right_camera_info.header.stamp = right_msg.header.stamp
-            self.left_info_pub.publish(self.left_camera_info)
-            self.right_info_pub.publish(self.right_camera_info)
-        except Exception as e:
-            self.get_logger().error(f"影像發布失敗: {e}")
-            return
+        self.pub_left.publish(left_msg)
+        self.pub_right.publish(right_msg)
+        self.pub_left_info.publish(self.left_info)
+        self.pub_right_info.publish(self.right_info)
 
-        # 障礙物檢測
-        obstacle_detected = self.detect_obstacle_simple(left_bgr)
-        obs_msg = Bool()
-        obs_msg.data = obstacle_detected
-        self.obstacle_pub.publish(obs_msg)
-        if self.debug_mode:
-            self.get_logger().info(f"障礙物檢測: {'有' if obstacle_detected else '無'}")
-
-    def detect_obstacle_simple(self, image):
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        h, w = gray.shape
-        roi_top = int(h * (1 - self.detection_area_ratio))
-        roi = gray[roi_top:, :]
-        edges = cv2.Canny(roi, 50, 150)
-        edge_count = np.count_nonzero(edges)
-        return edge_count > self.obstacle_threshold
-
-    def compute_stereo_disparity(self, left_img, right_img):
-        gray_left = cv2.cvtColor(left_img, cv2.COLOR_BGR2GRAY)
-        gray_right = cv2.cvtColor(right_img, cv2.COLOR_BGR2GRAY)
-        disparity = self.stereo_matcher.compute(gray_left, gray_right)
-        return disparity
-
-    def estimate_distance(self, disparity):
-        h, w = disparity.shape
-        center_region = disparity[h//3:2*h//3, w//3:2*w//3]
-        valid_disparity = center_region[center_region > 0]
-        if len(valid_disparity) == 0:
-            return float('inf')
-        avg_disparity = np.median(valid_disparity)
-        distance_mm = (self.baseline_mm * self.focal_length) / (avg_disparity / 16.0)
-        return distance_mm / 10.0
-
+    # -------------------------------------------------------
     def destroy_node(self):
         self.running = False
-        if self.capture_thread:
-            self.capture_thread.join(timeout=1.0)
-        if self.camera_left:
-            self.camera_left.release()
-        if self.camera_right:
-            self.camera_right.release()
+        self.cap_left.release()
+        self.cap_right.release()
         super().destroy_node()
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CameraNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    node = StereoCameraNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':

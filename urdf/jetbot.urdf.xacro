@@ -1,11 +1,9 @@
 <?xml version="1.0"?>
 <robot name="jetbot" xmlns:xacro="http://www.ros.org/wiki/xacro">
-<!-- 尺寸定義 -->
-<!-- 參數定義 -->
-<xacro:property name="wheel_radius" value="0.0325"/>  <!-- 對應 wheel_link_radius -->
-<xacro:property name="wheel_thickness" value="0.025"/>  <!-- 對應 wheel_link_length -->
-<xacro:property name="wheel_distance" value="0.175"/>  <!-- 左右輪距 = 2 × 0.0875 -->
-<xacro:property name="wheel_x_offset" value="0.05"/>  <!-- 輪子前後位置 -->
+<xacro:property name="wheel_radius" value="0.0325"/>
+<xacro:property name="wheel_thickness" value="0.025"/>
+<xacro:property name="wheel_distance" value="0.175"/>
+<xacro:property name="wheel_x_offset" value="0.05"/>
 
 <xacro:property name="body_link_x_dim" value="0.20"/>
 <xacro:property name="body_link_y_dim" value="0.15"/>
@@ -34,7 +32,7 @@
     <inertial>
         <origin rpy="0 0 0" xyz="0 0 0"/>
         <mass value="${wheel_mass}"/>
-        <inertia ixx="${I_wheel}" ixy="0.0" ixz="0.0" 
+        <inertia ixx="${I_wheel}" ixy="0.0" ixz="0.0"
                  iyy="${I_wheel}" iyz="0" izz="${Iz_wheel}"/>
     </inertial>
 </xacro:macro>
@@ -43,7 +41,7 @@
     <inertial>
         <origin rpy="0 0 0" xyz="0 0 0"/>
         <mass value="${caster_mass}"/>
-        <inertia ixx="${I_caster}" ixy="0.0" ixz="0.0" 
+        <inertia ixx="${I_caster}" ixy="0.0" ixz="0.0"
                  iyy="${I_caster}" iyz="0" izz="${I_caster}"/>
     </inertial>
 </xacro:macro>
@@ -83,14 +81,14 @@
         <origin rpy="0 0 0" xyz="0 0 0"/>
         <material name="blue"/>
     </visual>
-    
+
     <collision>
         <geometry>
             <box size="${body_link_x_dim} ${body_link_y_dim} ${body_link_z_dim}"/>
         </geometry>
         <origin rpy="0 0 0" xyz="0 0 0"/>
     </collision>
-    
+
     <inertial>
         <origin rpy="0 0 0" xyz="0 0 0"/>
         <mass value="${body_mass}"/>
@@ -109,72 +107,53 @@
 
 <link name="base_link"/>
 
-<!-- 左輪 -->
 <link name="left_wheel">
     <visual>
         <geometry>
             <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
         </geometry>
-        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
-        <material name="black">
-            <color rgba="0.1 0.1 0.1 1.0"/>
-        </material>
-    </visual>
-    <collision>
-        <geometry>
-            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
-        </geometry>
-        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
-    </collision>
-    <inertial>
-        <mass value="0.1"/>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
-        <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
-                 iyy="0.0001" iyz="0.0"
-                 izz="0.0001"/>
-    </inertial>
-</link>
-
-<!-- 右輪 -->
-<link name="right_wheel">
-    <visual>
-        <geometry>
-            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
-        </geometry>
-        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
         <material name="black"/>
     </visual>
     <collision>
         <geometry>
             <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
         </geometry>
-        <origin xyz="0 0 0" rpy="1.5708 0 0"/>  <!-- link 內設為 0 -->
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
     </collision>
-    <inertial>
-        <mass value="0.1"/>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
-        <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
-                 iyy="0.0001" iyz="0.0"
-                 izz="0.0001"/>
-    </inertial>
+    <xacro:inertia_wheel/>
 </link>
 
-<!-- 輪子關節 - 用你喜歡的格式 -->
+<link name="right_wheel">
+    <visual>
+        <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+        <material name="black"/>
+    </visual>
+    <collision>
+        <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+    </collision>
+    <xacro:inertia_wheel/>
+</link>
+
 <joint name="left_wheel_joint" type="continuous">
     <parent link="body_link"/>
     <child link="left_wheel"/>
-    <origin xyz="${wheel_x_offset} ${wheel_distance/2} 0" rpy="0 0 0"/>
-    <!-- X=0.05, Y=0.0875, Z=0 -->
+    <origin xyz="${wheel_x_offset} ${wheel_distance/2 + wheel_thickness/2} ${wheel_link_z_location}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
 </joint>
 
 <joint name="right_wheel_joint" type="continuous">
     <parent link="body_link"/>
     <child link="right_wheel"/>
-    <origin xyz="${wheel_x_offset} ${-wheel_distance/2} 0" rpy="0 0 0"/>
-    <!-- X=0.05, Y=-0.0875, Z=0 -->
+    <origin xyz="${wheel_x_offset} ${-wheel_distance/2 - wheel_thickness/2} ${wheel_link_z_location}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-</joint>ㄋ
+</joint>
 
 <joint name="caster_joint" type="fixed">
     <parent link="body_link"/>
@@ -190,14 +169,14 @@
         </geometry>
         <material name="silver"/>
     </visual>
-    
+
     <collision>
         <origin rpy="0 0 0" xyz="0 0 0"/>
         <geometry>
             <sphere radius="${caster_link_radius}"/>
         </geometry>
     </collision>
-    
+
     <xacro:inertia_caster/>
 </link>
 

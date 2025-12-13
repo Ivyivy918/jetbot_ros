@@ -67,6 +67,8 @@ setup(
             'data_collection = jetbot_ros.data_collection:main',
             'train_navigation = jetbot_ros.dnn.train:main',
             'reshape_model = jetbot_ros.dnn.reshape_model:main',
+            'stereo_depth_node = jetbot_ros.stereo_depth_node:main',
+            'combined_image = jetbot_ros.combined_image:main',
         ],
     },
     classifiers=[

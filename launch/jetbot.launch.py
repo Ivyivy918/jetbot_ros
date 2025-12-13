@@ -48,15 +48,39 @@ def generate_launch_description():
         # odom -> base_footprint 由 motors_node 動態發布，不再需要靜態 TF
         
 
-        # ========== Camera Node ==========
+        # ========== Stereo PointCloud Node ==========
         Node(
             package='jetbot_ros',
             executable='camera_node',
-            name='camera_node',
+            name='stereo_pointcloud_node',
             output='screen',
             additional_env={'DISPLAY': ':0'}
         ),
-        
+
+        # ========== Depth Estimation Node ==========
+        Node(
+            package='jetbot_ros',
+            executable='stereo_depth_node',
+            name='stereo_depth_node',
+            output='screen',
+            parameters=[{
+                'left_camera_config': camera_left_yaml,
+                'right_camera_config': camera_right_yaml,
+                'baseline': 0.11,
+                'min_disparity': 0,
+                'num_disparities': 64,
+                'block_size': 15
+            }]
+        ),
+
+        # ========== Combined Image Node ==========
+        Node(
+            package='jetbot_ros',
+            executable='combined_image',
+            name='combined_image_node',
+            output='screen'
+        ),
+
         # ========== Motor Node ==========
         Node(
             package='jetbot_ros',
