@@ -4,12 +4,13 @@
 """
 立体相机深度估计节点
 功能: 从左右相机图像计算深度并发布深度图
+特性: 支持基准面校准 (启动时需要在50cm处放置平面进行校准)
 """
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Bool, String
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
 import numpy as np
@@ -29,6 +30,8 @@ class StereoDepthNode(Node):
         self.declare_parameter('min_disparity', 0)
         self.declare_parameter('num_disparities', 64)
         self.declare_parameter('block_size', 15)
+        self.declare_parameter('calibration_distance', 0.5)  # 校准距离 50 公分
+        self.declare_parameter('calibration_frames', 30)  # 用于校准的帧数
 
         # 读取参数
         left_config_path = self.get_parameter('left_camera_config').value
@@ -58,6 +61,14 @@ class StereoDepthNode(Node):
         self.min_disparity = self.get_parameter('min_disparity').value
         self.num_disparities = self.get_parameter('num_disparities').value
         self.block_size = self.get_parameter('block_size').value
+
+        # 校准参数
+        self.calibration_distance = self.get_parameter('calibration_distance').value
+        self.calibration_frames = self.get_parameter('calibration_frames').value
+        self.is_calibrated = False
+        self.calibration_factor = 1.0
+        self.frame_count = 0
+        self.calibration_depths = []
 
         # CV Bridge
         self.bridge = CvBridge()
@@ -113,9 +124,20 @@ class StereoDepthNode(Node):
             10
         )
 
+        # 发布校准状态
+        self.calibration_status_pub = self.create_publisher(
+            String,
+            'stereo/calibration_status',
+            10
+        )
+
         self.get_logger().info('深度估计节点已启动')
         self.get_logger().info('订阅: camera_left/image_rect, camera_right/image_rect')
         self.get_logger().info('发布: stereo/depth, stereo/avg_depth, stereo/disparity')
+        self.get_logger().info('='*50)
+        self.get_logger().info('⚠️  校准模式: 请在相机前 50 公分处放置平面')
+        self.get_logger().info(f'   将采集 {self.calibration_frames} 帧进行校准...')
+        self.get_logger().info('='*50)
 
     def load_camera_config(self, config_path):
         """从 YAML 文件加载相机配置"""
@@ -159,10 +181,19 @@ class StereoDepthNode(Node):
             # 计算视差图
             disparity = self.stereo.compute(left_image, right_image).astype(np.float32) / 16.0
 
-            # 计算深度图: depth = (baseline * focal_length) / disparity
+            # 计算原始深度图: depth = (baseline * focal_length) / disparity
             depth_map = np.zeros_like(disparity, dtype=np.float32)
             valid_mask = disparity > 0
             depth_map[valid_mask] = (self.baseline * self.focal_length) / disparity[valid_mask]
+
+            # 校准模式：收集校准数据
+            if not self.is_calibrated and self.frame_count < self.calibration_frames:
+                self.calibrate(depth_map, valid_mask)
+                return
+
+            # 应用校准因子
+            if self.is_calibrated:
+                depth_map = depth_map * self.calibration_factor
 
             # 限制深度范围 (0.1m 到 10m)
             depth_map = np.clip(depth_map, 0.1, 10.0)
@@ -179,7 +210,7 @@ class StereoDepthNode(Node):
                 self.avg_depth_pub.publish(avg_depth_msg)
 
                 self.get_logger().info(
-                    f'平均深度: {avg_depth:.2f} m',
+                    f'平均深度: {avg_depth:.2f} m (校准因子: {self.calibration_factor:.3f})',
                     throttle_duration_sec=1.0
                 )
 
@@ -190,6 +221,45 @@ class StereoDepthNode(Node):
             self.get_logger().error(f'CV Bridge 错误: {e}')
         except Exception as e:
             self.get_logger().error(f'处理图像时出错: {e}')
+
+    def calibrate(self, depth_map, valid_mask):
+        """执行深度校准"""
+        self.frame_count += 1
+
+        # 计算当前帧的平均深度
+        valid_depths = depth_map[valid_mask]
+        if len(valid_depths) > 0:
+            avg_depth = float(np.mean(valid_depths))
+            self.calibration_depths.append(avg_depth)
+
+            status_msg = String()
+            status_msg.data = f'校准中... {self.frame_count}/{self.calibration_frames} (当前深度: {avg_depth:.3f}m)'
+            self.calibration_status_pub.publish(status_msg)
+
+            self.get_logger().info(
+                f'📊 校准进度: {self.frame_count}/{self.calibration_frames} - 测量深度: {avg_depth:.3f} m'
+            )
+
+        # 校准完成
+        if self.frame_count >= self.calibration_frames:
+            if len(self.calibration_depths) > 0:
+                measured_avg_depth = np.mean(self.calibration_depths)
+                self.calibration_factor = self.calibration_distance / measured_avg_depth
+                self.is_calibrated = True
+
+                self.get_logger().info('='*50)
+                self.get_logger().info('✅ 校准完成!')
+                self.get_logger().info(f'   目标距离: {self.calibration_distance:.3f} m')
+                self.get_logger().info(f'   测量距离: {measured_avg_depth:.3f} m')
+                self.get_logger().info(f'   校准因子: {self.calibration_factor:.3f}')
+                self.get_logger().info('='*50)
+
+                status_msg = String()
+                status_msg.data = f'校准完成! 因子: {self.calibration_factor:.3f}'
+                self.calibration_status_pub.publish(status_msg)
+            else:
+                self.get_logger().error('❌ 校准失败: 未能获取有效深度数据')
+                self.is_calibrated = True  # 继续运行但不应用校准
 
     def publish_depth_map(self, depth_map, header):
         """发布深度图 (32位浮点数图像)"""
