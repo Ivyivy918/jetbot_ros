@@ -25,12 +25,12 @@ class StereoCameraNode(Node):
         self.running = True
 
         # -------------------------------
-        # Load calibration
+        # 讀取相機校正檔 (確保你有把 left.yaml / right.yaml 放在 config 資料夾下)
         # -------------------------------
         self.load_calibration()
 
         # -------------------------------
-        # Publishers (RTAB-Map compatible)
+        # 發佈者設定 (符合 RTAB-Map 與下游節點需求)
         # -------------------------------
         self.pub_left = self.create_publisher(Image, '/camera_left/image_rect', 10)
         self.pub_right = self.create_publisher(Image, '/camera_right/image_rect', 10)
@@ -38,27 +38,31 @@ class StereoCameraNode(Node):
         self.pub_right_info = self.create_publisher(CameraInfo, '/camera_right/camera_info', 10)
 
         # -------------------------------
-        # Init CSI cameras
+        # 初始化 CSI 相機 (使用優化後的 GStreamer 管線)
         # -------------------------------
         self.cap_left = cv2.VideoCapture(self.gst_pipeline(1), cv2.CAP_GSTREAMER)
         self.cap_right = cv2.VideoCapture(self.gst_pipeline(0), cv2.CAP_GSTREAMER)
 
         if not self.cap_left.isOpened() or not self.cap_right.isOpened():
-            raise RuntimeError("❌ 無法開啟 CSI 相機")
+            raise RuntimeError("❌ 無法開啟 CSI 相機，請檢查 nvargus-daemon 狀態")
 
-        self.get_logger().info("✅ Stereo CSI cameras opened")
+        self.get_logger().info("✅ Stereo CSI cameras opened successfully (Headless Mode)")
 
+        # 啟動背景擷取執行緒
         self.thread = threading.Thread(target=self.capture_loop, daemon=True)
         self.thread.start()
 
+        # 設定發佈頻率 (15 FPS 避免網路塞車)
         self.create_timer(1.0 / 15.0, self.publish_images)
 
+    # -------------------------------------------------------
+    # 優化版的 GStreamer 管線 (防崩潰、降延遲)
     # -------------------------------------------------------
     def gst_pipeline(self, sensor_id):
         return (
             f"nvarguscamerasrc sensor-id={sensor_id} ! "
-            "video/x-raw(memory:NVMM), width=1280, height=720, framerate=30/1 ! "
-            "nvvidconv ! videoconvert ! video/x-raw, format=GRAY8 ! appsink"
+            "video/x-raw(memory:NVMM), width=640, height=480, framerate=21/1 ! "
+            "nvvidconv ! videoconvert ! video/x-raw, format=GRAY8 ! appsink drop=true max-buffers=1"
         )
 
     # -------------------------------------------------------
@@ -77,7 +81,7 @@ class StereoCameraNode(Node):
         self.cx = left['camera_matrix']['data'][2]
         self.cy = left['camera_matrix']['data'][5]
 
-        # baseline = -Tx / fx  (Tx in P matrix)
+        # 計算基準線長度 (baseline)
         Tx = right['projection_matrix']['data'][3]
         self.baseline = -Tx / self.fx
 
@@ -110,6 +114,7 @@ class StereoCameraNode(Node):
                 with self.lock:
                     self.left_img = l.copy()
                     self.right_img = r.copy()
+            # 微小休眠避免吃光 CPU
             time.sleep(0.005)
 
     # -------------------------------------------------------
@@ -122,11 +127,14 @@ class StereoCameraNode(Node):
 
         stamp = self.get_clock().now().to_msg()
 
-        left_msg = self.bridge.cv2_to_imgmsg(left, encoding='mono8')
-        right_msg = self.bridge.cv2_to_imgmsg(right, encoding='mono8')
+        # 這裡發佈的是 mono8 (單色灰階)，是深度計算和 RTAB-Map 的最愛
+        left_msg = self.bridge.cv2_to_imgmsg(left, encoding='bgr8')
+        right_msg = self.bridge.cv2_to_imgmsg(right, encoding='bgr8')
 
         left_msg.header.stamp = stamp
         right_msg.header.stamp = stamp
+        left_msg.header.frame_id = 'camera_left_optical_frame'
+        right_msg.header.frame_id = 'camera_right_optical_frame'
 
         self.left_info.header.stamp = stamp
         self.right_info.header.stamp = stamp
@@ -147,9 +155,13 @@ class StereoCameraNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = StereoCameraNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-JetBot 完整系統啟動檔案
-功能: 雙鏡頭 + 鍵盤控制 + RTAB-Map SLAM + RViz2 視覺化 + 機器人模型
-使用: ros2 launch jetbot_ros jetbot.launch.py
+JetBot 邊緣運算啟動檔案 (Headless 版本)
+功能: 雙鏡頭發布 + 深度估計 + 馬達控制 + RTAB-Map 背景 SLAM
+注意: Rviz2 與鍵盤控制請在遠端 PC (Ivy) 上執行
 """
 from launch import LaunchDescription
 from launch_ros.actions import Node
@@ -11,18 +11,13 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    
-    # 取得套件路徑
     pkg_share = get_package_share_directory('jetbot_ros')
-    rviz_config = os.path.join(pkg_share, 'rviz', 'jetbot_mapping.rviz')
     urdf_file = os.path.join(pkg_share, 'urdf', 'jetbot.urdf.xacro')
-    
-    # 相機校正檔案路徑
     camera_left_yaml = os.path.join(pkg_share, 'config/left.yaml')
     camera_right_yaml = os.path.join(pkg_share, 'config/right.yaml')
     
     return LaunchDescription([
-        # ========== Robot State Publisher ==========
+        # ========== 機器人狀態發布 ==========
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -33,31 +28,17 @@ def generate_launch_description():
                 'use_sim_time': False
             }]
         ) if os.path.exists(urdf_file) else None,
-        
-        # ========== TF Transforms ==========
-        # map -> odom 靜態變換（當不使用 SLAM 時需要）
-        # 如果 rtabmap 發布 map->odom，這個可以註解掉
-        # Node(
-        #     package='tf2_ros',
-        #     executable='static_transform_publisher',
-        #     name='map_to_odom',
-        #     arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
-        #     output='screen'
-        # ),
 
-        # odom -> base_footprint 由 motors_node 動態發布，不再需要靜態 TF
-        
-
-        # ========== Stereo PointCloud Node ==========
+        # ========== 雙相機擷取節點 (無螢幕需求) ==========
         Node(
             package='jetbot_ros',
             executable='camera_node',
             name='stereo_pointcloud_node',
-            output='screen',
-            additional_env={'DISPLAY': ':0'}
+            output='screen'
+            # 移除了強制找 DISPLAY 的環境變數
         ),
 
-        # ========== Depth Estimation Node ==========
+        # ========== 深度估計節點 ==========
         Node(
             package='jetbot_ros',
             executable='stereo_depth_node',
@@ -73,15 +54,7 @@ def generate_launch_description():
             }]
         ),
 
-        # ========== Combined Image Node ==========
-        Node(
-            package='jetbot_ros',
-            executable='combined_image',
-            name='combined_image_node',
-            output='screen'
-        ),
-
-        # ========== Motor Node ==========
+        # ========== 馬達控制節點 ==========
         Node(
             package='jetbot_ros',
             executable='motors_node',
@@ -89,17 +62,7 @@ def generate_launch_description():
             output='screen'
         ),
         
-        # ========== Teleop Keyboard ==========
-        Node(
-            package='jetbot_ros',
-            executable='teleop_keyboard',
-            name='teleop_keyboard',
-            output='screen',
-            prefix='xterm -e',
-            emulate_tty=True
-        ),
-        
-        # ========== RTAB-Map SLAM ==========
+        # ========== RTAB-Map SLAM (背景運算) ==========
         Node(
             package='rtabmap_slam',
             executable='rtabmap',
@@ -114,31 +77,21 @@ def generate_launch_description():
                 'publish_tf': True,
                 'approx_sync': True,
                 'queue_size': 30,
-                
-                # 降低處理頻率
                 'Rtabmap/DetectionRate': '2.0',
-                
-                # 優化參數
                 'RGBD/AngularUpdate': '0.05',
                 'RGBD/LinearUpdate': '0.05',
                 'RGBD/OptimizeFromGraphEnd': 'false',
                 'Optimizer/Strategy': '0',
                 'Mem/IncrementalMemory': 'true',
                 'Mem/InitWMWithAllNodes': 'false',
-                
-                # ===== 關鍵：立體視覺參數 =====
-                'Stereo/MaxDisparity': '256',  # 增加視差範圍
+                'Stereo/MaxDisparity': '256',
                 'Stereo/MinDisparity': '1',
                 'Stereo/OpticalFlow': 'true',
-                
-                # ===== 關鍵：特徵提取參數 =====
-                'Vis/FeatureType': '6',  # GFTT
+                'Vis/FeatureType': '6',
                 'Vis/MaxFeatures': '1000',
-                'Vis/MinInliers': '10',  # 降低要求
+                'Vis/MinInliers': '10',
                 'Vis/InlierDistance': '0.1',
-                
-                # ===== 回環檢測 =====
-                'Kp/DetectorStrategy': '6',  # GFTT
+                'Kp/DetectorStrategy': '6',
                 'Kp/MaxFeatures': '400',
             }],
             remappings=[
@@ -148,14 +101,5 @@ def generate_launch_description():
                 ('right/camera_info', '/camera_right/camera_info'),
             ],
             arguments=['--delete_db_on_start']
-        ),
-        
-        # ========== RViz2 ==========
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            output='screen',
-            arguments=['-d', rviz_config] if os.path.exists(rviz_config) else []
         ),
     ])
