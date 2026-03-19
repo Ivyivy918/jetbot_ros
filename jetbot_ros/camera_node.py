@@ -6,7 +6,6 @@ import yaml
 import os
 import threading
 import time
-
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
@@ -16,56 +15,56 @@ from ament_index_python.packages import get_package_share_directory
 class StereoCameraNode(Node):
     def __init__(self):
         super().__init__('stereo_camera_node')
-
         self.bridge = CvBridge()
         self.lock = threading.Lock()
-
         self.left_img = None
         self.right_img = None
         self.running = True
 
-        # -------------------------------
-        # 讀取相機校正檔 (確保你有把 left.yaml / right.yaml 放在 config 資料夾下)
-        # -------------------------------
         self.load_calibration()
 
-        # -------------------------------
-        # 發佈者設定 (符合 RTAB-Map 與下游節點需求)
-        # -------------------------------
         self.pub_left = self.create_publisher(Image, '/camera_left/image_rect', 10)
         self.pub_right = self.create_publisher(Image, '/camera_right/image_rect', 10)
         self.pub_left_info = self.create_publisher(CameraInfo, '/camera_left/camera_info', 10)
         self.pub_right_info = self.create_publisher(CameraInfo, '/camera_right/camera_info', 10)
 
-        # -------------------------------
-        # 初始化 CSI 相機 (使用優化後的 GStreamer 管線)
-        # -------------------------------
-        self.cap_left = cv2.VideoCapture(self.gst_pipeline(1), cv2.CAP_GSTREAMER)
-        self.cap_right = cv2.VideoCapture(self.gst_pipeline(0), cv2.CAP_GSTREAMER)
+        # ✅ 關鍵：必須設定 DISPLAY 環境變數，否則 nvarguscamerasrc 會報 EGL 錯誤
+        os.environ['DISPLAY'] = ':0'
 
-        if not self.cap_left.isOpened() or not self.cap_right.isOpened():
-            raise RuntimeError("❌ 無法開啟 CSI 相機，請檢查 nvargus-daemon 狀態")
+        self.get_logger().info("🔧 Opening left camera (sensor-id=1)...")
+        self.cap_left = cv2.VideoCapture(self.gst_pipeline(0), cv2.CAP_GSTREAMER)
+        time.sleep(2.0)  # 等第一個相機穩定
 
-        self.get_logger().info("✅ Stereo CSI cameras opened successfully (Headless Mode)")
+        self.get_logger().info("🔧 Opening right camera (sensor-id=0)...")
+        self.cap_right = cv2.VideoCapture(self.gst_pipeline(1), cv2.CAP_GSTREAMER)
 
-        # 啟動背景擷取執行緒
+        if not self.cap_left.isOpened():
+            raise RuntimeError("❌ 無法開啟左相機 (sensor-id=1)")
+        if not self.cap_right.isOpened():
+            raise RuntimeError("❌ 無法開啟右相機 (sensor-id=0)")
+
+        self.get_logger().info("✅ Stereo CSI cameras opened successfully")
+
         self.thread = threading.Thread(target=self.capture_loop, daemon=True)
         self.thread.start()
 
-        # 設定發佈頻率 (15 FPS 避免網路塞車)
         self.create_timer(1.0 / 15.0, self.publish_images)
 
-    # -------------------------------------------------------
-    # 優化版的 GStreamer 管線 (防崩潰、降延遲)
-    # -------------------------------------------------------
     def gst_pipeline(self, sensor_id):
+        # ✅ 修正重點：
+        # 1. caps 字串內不要有多餘空格（width=1280 不是 width= 1280）
+        # 2. nvvidconv 後面要明確指定輸出格式
+        # 3. appsink 加 sync=false 避免 buffer 卡住
         return (
             f"nvarguscamerasrc sensor-id={sensor_id} ! "
-            "video/x-raw(memory:NVMM), width=640, height=480, framerate=21/1 ! "
-            "nvvidconv ! videoconvert ! video/x-raw, format=GRAY8 ! appsink drop=true max-buffers=1"
+            f"video/x-raw(memory:NVMM),width=1280,height=720,framerate=60/1 ! "
+            f"nvvidconv ! "
+            f"video/x-raw,width=640,height=480,format=BGRx ! "
+            f"videoconvert ! "
+            f"video/x-raw,format=BGR ! "
+            f"appsink drop=true max-buffers=1 sync=false"
         )
 
-    # -------------------------------------------------------
     def load_calibration(self):
         pkg = get_package_share_directory('jetbot_ros')
         left_yaml = os.path.join(pkg, 'config', 'left.yaml')
@@ -81,18 +80,14 @@ class StereoCameraNode(Node):
         self.cx = left['camera_matrix']['data'][2]
         self.cy = left['camera_matrix']['data'][5]
 
-        # 計算基準線長度 (baseline)
         Tx = right['projection_matrix']['data'][3]
         self.baseline = -Tx / self.fx
 
-        self.get_logger().info(
-            f"📐 fx={self.fx:.2f}, baseline={self.baseline:.4f} m"
-        )
+        self.get_logger().info(f"📐 fx={self.fx:.2f}, baseline={self.baseline:.4f} m")
 
         self.left_info = self.make_camera_info(left, 'camera_left_optical_frame')
         self.right_info = self.make_camera_info(right, 'camera_right_optical_frame')
 
-    # -------------------------------------------------------
     def make_camera_info(self, calib, frame_id):
         msg = CameraInfo()
         msg.header.frame_id = frame_id
@@ -105,29 +100,36 @@ class StereoCameraNode(Node):
         msg.p = calib['projection_matrix']['data']
         return msg
 
-    # -------------------------------------------------------
     def capture_loop(self):
+        consecutive_failures = 0
         while self.running:
             ret_l, l = self.cap_left.read()
             ret_r, r = self.cap_right.read()
+
             if ret_l and ret_r:
                 with self.lock:
                     self.left_img = l.copy()
                     self.right_img = r.copy()
-            # 微小休眠避免吃光 CPU
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if consecutive_failures % 30 == 1:
+                    self.get_logger().warn(
+                        f"⚠️ 相機讀取失敗 {consecutive_failures} 次 "
+                        f"(left={ret_l}, right={ret_r})"
+                    )
+
             time.sleep(0.005)
 
-    # -------------------------------------------------------
     def publish_images(self):
         with self.lock:
             if self.left_img is None or self.right_img is None:
                 return
-            left = self.left_img
-            right = self.right_img
+            left = self.left_img.copy()
+            right = self.right_img.copy()
 
         stamp = self.get_clock().now().to_msg()
 
-        # 這裡發佈的是 mono8 (單色灰階)，是深度計算和 RTAB-Map 的最愛
         left_msg = self.bridge.cv2_to_imgmsg(left, encoding='bgr8')
         right_msg = self.bridge.cv2_to_imgmsg(right, encoding='bgr8')
 
@@ -144,9 +146,9 @@ class StereoCameraNode(Node):
         self.pub_left_info.publish(self.left_info)
         self.pub_right_info.publish(self.right_info)
 
-    # -------------------------------------------------------
     def destroy_node(self):
         self.running = False
+        time.sleep(0.1)
         self.cap_left.release()
         self.cap_right.release()
         super().destroy_node()
@@ -161,7 +163,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

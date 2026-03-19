@@ -35,7 +35,8 @@ setup(
         
         # Camera calibration files
         ('share/' + package_name + '/config', glob('config/*.yaml')),
-        
+        # Meshes
+        ('share/' + package_name + '/meshes', glob('meshes/*.STL')),
         # RViz config
         ('share/' + package_name + '/rviz', glob('rviz/*.rviz')),
          
