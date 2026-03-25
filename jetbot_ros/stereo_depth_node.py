@@ -135,7 +135,7 @@ class StereoDepthNode(Node):
 
             # Fix 4: 下限從 0.1m 降為 0.05m，避免 5~10cm 近物被誤刪
             # 上限 5m 已足夠室內避障使用
-            depth[(depth < 0.05) | (depth > 5.0)] = 0.0
+            depth[(depth < 0.10) | (depth > 5.0)] = 0.0
 
             # ── 3. 正前方最近距離（避障用）────────────────────
             roi_ratio = self.get_parameter('roi_center_ratio').value
