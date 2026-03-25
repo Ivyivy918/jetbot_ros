@@ -64,7 +64,7 @@ def generate_launch_description():
             name='stereo_depth_node',
             output='screen',
             parameters=[{
-                'num_disparities': 336,
+                'num_disparities': 544,
                 'block_size': 15,
                 'min_disparity': 0
             }]

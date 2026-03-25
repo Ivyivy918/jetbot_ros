@@ -47,7 +47,7 @@ class StereoDepthNode(Node):
         #   理由：baseline=0.1487m, fx_rect=1092.549
         #   50cm 物體需要視差 = 1092.549*0.1487/0.5 ≈ 325 pixels
         #   原本 64 只能偵測 >260cm 的物體，近物全部看不到
-        self.declare_parameter('num_disparities', 336)
+        self.declare_parameter('num_disparities', 544)
         self.declare_parameter('block_size',      15)
         self.declare_parameter('min_disparity',   0)
 
@@ -55,6 +55,10 @@ class StereoDepthNode(Node):
         self.declare_parameter('roi_center_ratio', 0.4)
         # 最近距離警告門檻（公尺）
         self.declare_parameter('min_dist_threshold', 0.5)
+
+        # ── CLAHE 影像增強（參考 AlexJinlei/Stereo_Vision_Camera）────
+        # 提升低對比度場景的視差匹配品質
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
         self.build_stereo()
         self.get_logger().info(
@@ -120,6 +124,10 @@ class StereoDepthNode(Node):
         try:
             left_gray  = self.bridge.imgmsg_to_cv2(left_msg,  'mono8')
             right_gray = self.bridge.imgmsg_to_cv2(right_msg, 'mono8')
+
+            # ── CLAHE 增強（改善低對比度場景的視差匹配）─────────
+            left_gray  = self.clahe.apply(left_gray)
+            right_gray = self.clahe.apply(right_gray)
 
             # ── 1. 計算視差圖 ──────────────────────────────────
             disp_raw = self.stereo.compute(
