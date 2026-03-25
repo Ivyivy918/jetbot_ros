@@ -155,7 +155,7 @@ class StereoDepthNode(Node):
             # Fix 3: 發布單位統一為公尺（移除原本的 *100 換算）
             # topic 說明已標注「單位公尺」，不應在這裡換算成公分
             dist_msg = Float32()
-            dist_msg.data = min_dist
+            dist_msg.data = min_dist * 100.0
             self.pub_mindist.publish(dist_msg)
 
             threshold = self.get_parameter('min_dist_threshold').value
