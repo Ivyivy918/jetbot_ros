@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import yaml
 import os
+from collections import deque
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32
 from cv_bridge import CvBridge
@@ -59,6 +60,10 @@ class StereoDepthNode(Node):
         # ── CLAHE 影像增強（參考 AlexJinlei/Stereo_Vision_Camera）────
         # 提升低對比度場景的視差匹配品質
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+        # ── 時間域中位數平滑（穩定輸出，減少幀間震盪）──────────
+        # 保留最近 5 幀的距離值，取中位數發布
+        self.dist_buffer = deque(maxlen=5)
 
         self.build_stereo()
         self.get_logger().info(
@@ -156,20 +161,23 @@ class StereoDepthNode(Node):
             valid_roi = roi[roi > 0.0]
 
             if valid_roi.size > 0:
-                min_dist = float(np.percentile(valid_roi, 5))  # 5th percentile，濾掉雜訊
+                min_dist = float(np.percentile(valid_roi, 10))  # 10th percentile，濾掉雜訊
             else:
                 min_dist = 0.0
 
-            # Fix 3: 發布單位統一為公尺（移除原本的 *100 換算）
-            # topic 說明已標注「單位公尺」，不應在這裡換算成公分
+            # 時間域中位數平滑：只有有效距離才加入 buffer
+            if min_dist > 0.0:
+                self.dist_buffer.append(min_dist)
+            smoothed_dist = float(np.median(self.dist_buffer)) if self.dist_buffer else 0.0
+
             dist_msg = Float32()
-            dist_msg.data = min_dist * 100.0
+            dist_msg.data = smoothed_dist * 100.0
             self.pub_mindist.publish(dist_msg)
 
             threshold = self.get_parameter('min_dist_threshold').value
-            if 0 < min_dist < threshold:
+            if 0 < smoothed_dist < threshold:
                 self.get_logger().warn(
-                    f'障礙物距離 {min_dist * 100:.1f}cm（門檻 {threshold * 100:.0f}cm）',
+                    f'障礙物距離 {smoothed_dist * 100:.1f}cm（門檻 {threshold * 100:.0f}cm）',
                     throttle_duration_sec=1.0
                 )
 
@@ -181,17 +189,17 @@ class StereoDepthNode(Node):
             # ── 5. 視覺化深度圖（colormap，方便 RViz 顯示）─────
             mask = depth > 0
             if mask.any():
-                d_norm = np.clip(depth, 0.05, 5.0)
-                d_u8 = ((d_norm - 0.05) / 4.95 * 255).astype(np.uint8)
+                d_norm = np.clip(depth, 0.50, 5.0)
+                d_u8 = ((d_norm - 0.50) / 4.50 * 255).astype(np.uint8)
                 depth_vis = cv2.applyColorMap(255 - d_u8, cv2.COLORMAP_JET)
                 depth_vis[~mask] = 0
 
-                # 在影像上標出 ROI 框和最近距離數字
+                # 在影像上標出 ROI 框和最近距離數字（使用平滑後的值）
                 cv2.rectangle(depth_vis, (x1, y1), (x2, y2), (255, 255, 255), 1)
-                if min_dist > 0:
+                if smoothed_dist > 0:
                     cv2.putText(
                         depth_vis,
-                        f'{min_dist * 100:.1f}cm',
+                        f'{smoothed_dist * 100:.1f}cm',
                         (x1, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         (255, 255, 255), 1
