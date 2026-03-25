@@ -1,13 +1,4 @@
 
-<!--
- JetBot URDF — fixed from sw2urdf export
-     Changes vs original:
-       1. Added base_footprint link (ground reference for RViz)
-       2. wheelLeft/wheelRight: removed <limit lower=0 upper=0> (caused TF break)
-       3. wheelLeft/wheelRight: axis corrected to "0 0 1" (joint-local Z after rpy rotation)
-       4. camera_right: mass/inertia corrected to match camera_left
-       5. Package name kept as "assembly_urdf" — just replace with your actual package name
--->
 <robot name="jetbot_urdf">
 <!--
 -->

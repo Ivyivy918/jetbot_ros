@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-JetBot 啟動檔 — 修正版
-修正項目：
-  1. 加入 joint_state_publisher（輪子 TF 不再斷掉）
-  2. URDF 改用純 URDF（不需要 xacro，避免 xacro 解析錯誤）
-  3. DISPLAY 統一設定
-"""
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.substitutions import Command
