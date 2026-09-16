@@ -1,0 +1,27 @@
+# 用法：python -m tools.doc_translator 手冊.pdf --config tools/doc_translator/example.config.yaml -y
+target_language: 繁體中文
+source_language: auto
+
+# 一開始就要提出的翻譯特殊要求。留空時由 Claude 自行判斷。
+instructions: |
+  這是 JetBot 機器人的技術手冊，讀者是有基礎 ROS2 經驗的工程師。
+  · 維持技術文件的敘述口吻，不要口語化。
+  · 產品名、節點名、topic 名稱、指令與參數一律保留原文。
+  · 中英夾雜時，中文與英文之間留一個半形空格。
+
+# 術語表：出現時必須採用這裡的譯法
+glossary:
+  obstacle avoidance: 避障
+  teleoperation: 遙控操作
+  depth map: 深度圖
+
+model: claude-opus-5
+effort: low            # 文字翻譯的思考強度
+image_effort: medium   # 圖片辨識的思考強度
+
+translate_images: true
+image_mode: redraw     # redraw = 譯文蓋回原位；skip = 保留原圖
+image_min_side: 48
+
+max_chars_per_batch: 3000
+concurrency: 4
