@@ -1,7 +1,0 @@
-# doc_translator 的相依套件
-#   pip install -r tools/doc_translator/requirements.txt
-anthropic>=1.0
-PyMuPDF>=1.24          # PDF：抽文字／塗銷／回寫／換圖
-python-docx>=1.1       # DOCX：段落、表格、頁首頁尾、內嵌圖片
-Pillow>=10.0           # 圖片重繪
-PyYAML>=5.4            # 選用：--config / --glossary 讀 YAML 時才需要
